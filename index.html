@@ -26,6 +26,17 @@
     <script type="text/babel">
       const { useState, useRef, useCallback } = React;
 
+      /* ── Daily Log helpers ────────────────────────────────────────── */
+      function todayKey() {
+        return 'foodscan_daily_' + new Date().toISOString().slice(0, 10);
+      }
+      function loadDailyLog() {
+        try { return JSON.parse(localStorage.getItem(todayKey()) || '[]'); } catch { return []; }
+      }
+      function saveDailyLog(log) {
+        localStorage.setItem(todayKey(), JSON.stringify(log));
+      }
+
       function fileToBase64(file) {
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -53,6 +64,7 @@
         return JSON.parse(data.result);
       }
 
+      /* ── Skeleton ─────────────────────────────────────────────────── */
       function Skeleton() {
         return (
           <div className="space-y-3 w-full">
@@ -83,7 +95,37 @@
         );
       }
 
-      function ResultCard({ result, imageUrl, onReset }) {
+      /* ── DailyLog ─────────────────────────────────────────────────── */
+      function DailyLog({ log, onClear }) {
+        const total = log.reduce((s, e) => s + e.calories, 0);
+        if (log.length === 0) return null;
+        return (
+          <div className="w-full max-w-md mx-auto mb-6 bg-white rounded-2xl border border-green-100 shadow-sm p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Today's Total</p>
+              <button onClick={onClear} className="text-xs text-gray-300 hover:text-red-400 transition-colors">Clear</button>
+            </div>
+            <ul className="space-y-1.5 mb-3">
+              {log.map((entry, i) => (
+                <li key={i} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-300 shrink-0" />
+                    <span>{entry.dish}</span>
+                    <span className="text-gray-300 text-xs">{entry.time}</span>
+                  </div>
+                  <span className="font-semibold text-gray-700 shrink-0">{entry.calories} kcal</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex items-center justify-between border-t border-green-50 pt-2">
+              <span className="text-sm font-semibold text-gray-500">Total</span>
+              <span className="text-lg font-extrabold text-green-600">{total} kcal</span>
+            </div>
+          </div>
+        );
+      }
+
+      function ResultCard({ result, imageUrl, onReset, onSave, saved }) {
         const total = result.macros.protein + result.macros.carbs + result.macros.fat;
         return (
           <div className="w-full max-w-md mx-auto space-y-4 pb-10">
@@ -132,7 +174,21 @@
                 <p className="text-sm text-green-800">{result.tip}</p>
               </div>
             </div>
-            <button onClick={onReset} className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm">
+            <button
+              onClick={onSave}
+              disabled={saved}
+              className={`w-full py-3 rounded-2xl font-semibold text-sm transition-colors shadow-sm ${
+                saved
+                  ? 'bg-gray-100 text-gray-400 cursor-default'
+                  : 'bg-white border border-green-400 text-green-600 hover:bg-green-50 active:bg-green-100'
+              }`}
+            >
+              {saved ? '✓ Saved to Today\'s Total' : 'Save to Today\'s Total'}
+            </button>
+            <button
+              onClick={onReset}
+              className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm"
+            >
               Analyze Another
             </button>
           </div>
@@ -163,7 +219,10 @@
               <p className="text-xs text-gray-300">PNG · JPG · WEBP · HEIC</p>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pick} />
             </div>
-            <button onClick={() => cameraRef.current?.click()} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors">
+            <button
+              onClick={() => cameraRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors"
+            >
               <span className="text-lg">📷</span> Take a Photo
             </button>
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={pick} />
@@ -176,11 +235,14 @@
         const [result,   setResult]  = useState(null);
         const [imageUrl, setImageUrl] = useState('');
         const [errorMsg, setErrorMsg] = useState('');
+        const [dailyLog, setDailyLog] = useState(() => loadDailyLog());
+        const [saved,    setSaved]   = useState(false);
 
         const handleFile = useCallback(async (file) => {
           if (!file.type.startsWith('image/')) { setErrorMsg('Please upload an image file.'); setState('error'); return; }
           setImageUrl(URL.createObjectURL(file));
           setState('loading');
+          setSaved(false);
           try {
             const data = await analyzeImage(file);
             setResult(data);
@@ -191,7 +253,25 @@
           }
         }, []);
 
-        const reset = useCallback(() => { setResult(null); setImageUrl(''); setErrorMsg(''); setState('idle'); }, []);
+        const handleSave = useCallback(() => {
+          if (!result || saved) return;
+          const entry = {
+            dish: result.dish,
+            calories: result.totalCalories,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          const updated = [...loadDailyLog(), entry];
+          saveDailyLog(updated);
+          setDailyLog(updated);
+          setSaved(true);
+        }, [result, saved]);
+
+        const clearLog = useCallback(() => {
+          saveDailyLog([]);
+          setDailyLog([]);
+        }, []);
+
+        const reset = useCallback(() => { setResult(null); setImageUrl(''); setErrorMsg(''); setSaved(false); setState('idle'); }, []);
 
         return (
           <div className="min-h-screen py-8 px-4">
@@ -199,7 +279,14 @@
               <h1 className="text-3xl font-extrabold text-gray-800 tracking-tight">FoodScan</h1>
               <p className="text-gray-400 mt-1 text-sm">AI-powered food & calorie analyzer</p>
             </div>
-            {state === 'idle' && <UploadZone onFile={handleFile} />}
+
+            {state === 'idle' && (
+              <>
+                <DailyLog log={dailyLog} onClear={clearLog} />
+                <UploadZone onFile={handleFile} />
+              </>
+            )}
+
             {state === 'loading' && (
               <div className="w-full max-w-md mx-auto space-y-4">
                 {imageUrl && <div className="rounded-2xl overflow-hidden shadow-md"><img src={imageUrl} className="w-full object-cover max-h-56" /></div>}
@@ -209,7 +296,11 @@
                 </div>
               </div>
             )}
-            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} />}
+
+            {state === 'result' && result && (
+              <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onSave={handleSave} saved={saved} />
+            )}
+
             {state === 'error' && (
               <div className="w-full max-w-md mx-auto space-y-4">
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-center">
@@ -217,7 +308,9 @@
                   <p className="text-red-700 font-semibold">Analysis Failed</p>
                   <p className="text-red-500 text-sm mt-2">{errorMsg}</p>
                 </div>
-                <button onClick={reset} className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors">Try Again</button>
+                <button onClick={reset} className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors">
+                  Try Again
+                </button>
               </div>
             )}
           </div>
