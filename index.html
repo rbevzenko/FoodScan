@@ -26,6 +26,7 @@
     <script type="text/babel">
       const { useState, useRef, useCallback } = React;
 
+      /* ── helpers ──────────────────────────────────────────────────── */
       function fileToBase64(file) {
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -38,8 +39,10 @@
       async function analyzeImage(file) {
         const apiKey = window.__ANTHROPIC_API_KEY__;
         if (!apiKey) throw new Error('API key not configured.');
+
         const base64 = await fileToBase64(file);
         const mediaType = file.type || 'image/jpeg';
+
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
@@ -49,35 +52,45 @@
             'content-type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-6',
             max_tokens: 1024,
             system: 'You are a nutrition expert. Analyze the food in this image and return ONLY valid JSON (no markdown) in this exact format: { "dish": "name", "totalCalories": 450, "confidence": "medium", "items": [{ "name": "chicken breast", "amount": "150g", "calories": 165 }], "macros": { "protein": 35, "carbs": 40, "fat": 12 }, "tip": "short health tip" }',
-            messages: [{ role: 'user', content: [
-              { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-              { type: 'text', text: 'Analyze this food image.' },
-            ]}],
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+                { type: 'text', text: 'Analyze this food image.' },
+              ],
+            }],
           }),
         });
-        if (!response.ok) { const err = await response.text(); throw new Error(`API error ${response.status}: ${err}`); }
+
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(`API error ${response.status}: ${err}`);
+        }
         const data = await response.json();
         return JSON.parse(data.content[0].text);
       }
 
+      /* ── Skeleton ─────────────────────────────────────────────────── */
       function Skeleton() {
         return (
           <div className="space-y-3 w-full">
-            {['h-6 w-2/3 mx-auto','h-4 w-full','h-4 w-5/6','h-4 w-4/6','h-3 w-full','h-3 w-full','h-3 w-full','h-10 w-full'].map((cls, i) => (
-              <div key={i} className={`shimmer rounded-xl ${cls}`} />
+            {[['2/3 mx-auto h-6'], ['full h-4'], ['5/6 h-4'], ['4/6 h-4'], ['full h-3'], ['full h-3'], ['full h-3'], ['full h-10']].map(([cls], i) => (
+              <div key={i} className={`shimmer rounded-xl w-${cls}`} />
             ))}
           </div>
         );
       }
 
+      /* ── ConfidenceBadge ──────────────────────────────────────────── */
       function ConfidenceBadge({ level }) {
         const style = { low: 'bg-red-100 text-red-700', medium: 'bg-yellow-100 text-yellow-700', high: 'bg-green-100 text-green-700' }[level] ?? 'bg-gray-100 text-gray-600';
         return <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${style}`}>{level} confidence</span>;
       }
 
+      /* ── MacroBar ─────────────────────────────────────────────────── */
       function MacroBar({ label, value, total, color }) {
         const pct = total > 0 ? Math.min(100, (value / total) * 100) : 0;
         return (
@@ -93,6 +106,7 @@
         );
       }
 
+      /* ── ResultCard ───────────────────────────────────────────────── */
       function ResultCard({ result, imageUrl, onReset }) {
         const total = result.macros.protein + result.macros.carbs + result.macros.fat;
         return (
@@ -100,7 +114,9 @@
             <div className="rounded-2xl overflow-hidden shadow-md">
               <img src={imageUrl} alt="food" className="w-full object-cover max-h-56" />
             </div>
+
             <div className="bg-white rounded-2xl shadow-sm border border-green-100 p-5 space-y-4">
+              {/* header */}
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <h2 className="text-xl font-bold text-gray-800">{result.dish}</h2>
@@ -111,7 +127,10 @@
                   <div className="text-xs text-gray-400 mt-0.5">kcal</div>
                 </div>
               </div>
+
               <hr className="border-green-50" />
+
+              {/* ingredients */}
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Ingredients</p>
                 <ul className="space-y-1.5">
@@ -127,7 +146,10 @@
                   ))}
                 </ul>
               </div>
+
               <hr className="border-green-50" />
+
+              {/* macros */}
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Macronutrients</p>
                 <div className="space-y-3">
@@ -136,24 +158,34 @@
                   <MacroBar label="Fat"     value={result.macros.fat}     total={total} color="bg-yellow-300" />
                 </div>
               </div>
+
               <hr className="border-green-50" />
+
+              {/* tip */}
               <div className="bg-green-50 rounded-xl p-3 flex gap-2">
                 <span className="text-green-500 text-lg shrink-0">💡</span>
                 <p className="text-sm text-green-800">{result.tip}</p>
               </div>
             </div>
-            <button onClick={onReset} className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm">
+
+            <button
+              onClick={onReset}
+              className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm"
+            >
               Analyze Another
             </button>
           </div>
         );
       }
 
+      /* ── UploadZone ───────────────────────────────────────────────── */
       function UploadZone({ onFile }) {
         const [dragging, setDragging] = useState(false);
-        const fileRef = useRef(null);
+        const fileRef   = useRef(null);
         const cameraRef = useRef(null);
+
         const pick = (e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; };
+
         return (
           <div className="w-full max-w-md mx-auto space-y-4">
             <div
@@ -161,7 +193,9 @@
               onDragLeave={() => setDragging(false)}
               onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
               onClick={() => fileRef.current?.click()}
-              className={`relative flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-2xl p-10 cursor-pointer transition-all duration-200 select-none ${dragging ? 'border-green-500 bg-green-50 scale-[1.02]' : 'border-green-200 bg-white hover:border-green-400 hover:bg-green-50'}`}
+              className={`relative flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-2xl p-10 cursor-pointer transition-all duration-200 select-none ${
+                dragging ? 'border-green-500 bg-green-50 scale-[1.02]' : 'border-green-200 bg-white hover:border-green-400 hover:bg-green-50'
+              }`}
             >
               <div className="text-5xl">🥗</div>
               <div className="text-center">
@@ -171,7 +205,11 @@
               <p className="text-xs text-gray-300">PNG · JPG · WEBP · HEIC</p>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pick} />
             </div>
-            <button onClick={() => cameraRef.current?.click()} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors">
+
+            <button
+              onClick={() => cameraRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors"
+            >
               <span className="text-lg">📷</span> Take a Photo
             </button>
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={pick} />
@@ -179,6 +217,7 @@
         );
       }
 
+      /* ── ApiKeyPrompt ─────────────────────────────────────────────── */
       function ApiKeyPrompt({ onKey }) {
         const [val, setVal] = useState('');
         return (
@@ -186,36 +225,64 @@
             <div className="text-center">
               <div className="text-4xl mb-2">🔑</div>
               <h2 className="font-bold text-gray-800">Enter Anthropic API Key</h2>
-              <p className="text-xs text-gray-400 mt-1">Stored in memory only</p>
+              <p className="text-xs text-gray-400 mt-1">Stored in memory only — never sent anywhere else</p>
             </div>
-            <input type="password" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && val.trim() && onKey(val.trim())} placeholder="sk-ant-..." className="w-full border border-green-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-green-300" />
-            <button onClick={() => val.trim() && onKey(val.trim())} className="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors">Start Analyzing</button>
+            <input
+              type="password"
+              value={val}
+              onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && val.trim() && onKey(val.trim())}
+              placeholder="sk-ant-..."
+              className="w-full border border-green-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-green-300"
+            />
+            <button
+              onClick={() => val.trim() && onKey(val.trim())}
+              className="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors"
+            >
+              Start Analyzing
+            </button>
           </div>
         );
       }
 
+      /* ── App ──────────────────────────────────────────────────────── */
       function App() {
-        const [state, setState] = useState('key');
-        const [result, setResult] = useState(null);
+        const [state,    setState]   = useState('key');
+        const [result,   setResult]  = useState(null);
         const [imageUrl, setImageUrl] = useState('');
         const [errorMsg, setErrorMsg] = useState('');
-        const setKey = useCallback((key) => { window.__ANTHROPIC_API_KEY__ = key; setState('idle'); }, []);
+
+        const setKey = useCallback((key) => {
+          window.__ANTHROPIC_API_KEY__ = key;
+          setState('idle');
+        }, []);
+
         const handleFile = useCallback(async (file) => {
           if (!file.type.startsWith('image/')) { setErrorMsg('Please upload an image file.'); setState('error'); return; }
           setImageUrl(URL.createObjectURL(file));
           setState('loading');
-          try { const data = await analyzeImage(file); setResult(data); setState('result'); }
-          catch (err) { setErrorMsg(err.message || 'Something went wrong.'); setState('error'); }
+          try {
+            const data = await analyzeImage(file);
+            setResult(data);
+            setState('result');
+          } catch (err) {
+            setErrorMsg(err.message || 'Something went wrong.');
+            setState('error');
+          }
         }, []);
+
         const reset = useCallback(() => { setResult(null); setImageUrl(''); setErrorMsg(''); setState('idle'); }, []);
+
         return (
           <div className="min-h-screen py-8 px-4">
             <div className="text-center mb-8">
               <h1 className="text-3xl font-extrabold text-gray-800 tracking-tight">FoodScan</h1>
               <p className="text-gray-400 mt-1 text-sm">AI-powered food & calorie analyzer</p>
             </div>
+
             {state === 'key' && <ApiKeyPrompt onKey={setKey} />}
             {state === 'idle' && <UploadZone onFile={handleFile} />}
+
             {state === 'loading' && (
               <div className="w-full max-w-md mx-auto space-y-4">
                 {imageUrl && <div className="rounded-2xl overflow-hidden shadow-md"><img src={imageUrl} className="w-full object-cover max-h-56" /></div>}
@@ -225,7 +292,9 @@
                 </div>
               </div>
             )}
+
             {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} />}
+
             {state === 'error' && (
               <div className="w-full max-w-md mx-auto space-y-4">
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-center">
@@ -233,7 +302,9 @@
                   <p className="text-red-700 font-semibold">Analysis Failed</p>
                   <p className="text-red-500 text-sm mt-2">{errorMsg}</p>
                 </div>
-                <button onClick={reset} className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors">Try Again</button>
+                <button onClick={reset} className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors">
+                  Try Again
+                </button>
               </div>
             )}
           </div>
