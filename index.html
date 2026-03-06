@@ -38,6 +38,73 @@
     <script type="text/babel">
       const { useState, useRef, useCallback, useEffect } = React;
 
+      /* ── Auth ─────────────────────────────────────────────────────── */
+      const USERS = [
+        { id: 1, label: 'User 1', password: 'green-bowl-4812'   },
+        { id: 2, label: 'User 2', password: 'calorie-scan-7703' },
+        { id: 3, label: 'User 3', password: 'fresh-start-2259'  },
+        { id: 4, label: 'User 4', password: 'macro-track-9147'  },
+        { id: 5, label: 'User 5', password: 'daily-feast-6380'  },
+      ];
+      const AUTH_KEY = 'foodscan_auth';
+
+      function loadAuth() {
+        try { const raw = localStorage.getItem(AUTH_KEY); if (raw) return JSON.parse(raw); } catch {}
+        return null;
+      }
+      function saveAuth(user) { localStorage.setItem(AUTH_KEY, JSON.stringify(user)); }
+      function clearAuth() { localStorage.removeItem(AUTH_KEY); }
+
+      /* ── LoginScreen ──────────────────────────────────────────────── */
+      function LoginScreen({ onLogin }) {
+        const [pw, setPw]     = useState('');
+        const [err, setErr]   = useState('');
+        const [show, setShow] = useState(false);
+
+        function handleSubmit(e) {
+          e.preventDefault();
+          const found = USERS.find(u => u.password === pw.trim());
+          if (found) { onLogin(found); }
+          else { setErr('Неверный пароль. Попробуй снова.'); setPw(''); }
+        }
+
+        return (
+          <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-to-br from-green-50 via-white to-emerald-50">
+            <div className="w-full max-w-sm">
+              <div className="text-center mb-8">
+                <div className="text-5xl mb-3">🥗</div>
+                <h1 className="text-3xl font-extrabold text-gray-800 tracking-tight">FoodScan</h1>
+                <p className="text-gray-400 mt-1 text-sm">Введи пароль для входа в личный кабинет</p>
+              </div>
+              <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-green-100 p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-600 mb-1.5">Пароль</label>
+                  <div className="relative">
+                    <input
+                      type={show ? 'text' : 'password'}
+                      value={pw}
+                      onChange={e => { setPw(e.target.value); setErr(''); }}
+                      placeholder="Введи пароль..."
+                      autoComplete="current-password"
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 pr-12 text-sm outline-none focus:border-green-400 transition-colors"
+                    />
+                    <button type="button" onClick={() => setShow(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg">
+                      {show ? '🙈' : '👁️'}
+                    </button>
+                  </div>
+                  {err && <p className="text-red-500 text-xs mt-1.5">{err}</p>}
+                </div>
+                <button type="submit" disabled={!pw.trim()}
+                  className="w-full py-3 rounded-xl bg-green-500 hover:bg-green-600 disabled:bg-green-200 text-white font-semibold text-sm transition-colors">
+                  Войти
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
       async function analyzeImage(file) {
         const base64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -292,11 +359,17 @@
 
       /* ── App ──────────────────────────────────────────────────────── */
       function App() {
+        const [auth,     setAuth]     = useState(() => loadAuth());
         const [state,    setState]    = useState('idle');
         const [result,   setResult]   = useState(null);
         const [imageUrl, setImageUrl] = useState('');
         const [errorMsg, setErrorMsg] = useState('');
         const [dailyLog, setDailyLog] = useState(() => loadDailyLog());
+
+        function handleLogin(user) { saveAuth(user); setAuth(user); }
+        function handleLogout() { clearAuth(); setAuth(null); setState('idle'); setResult(null); setImageUrl(''); setErrorMsg(''); }
+
+        if (!auth) return <LoginScreen onLogin={handleLogin} />;
 
         const handleFile = useCallback(async (file) => {
           if (!file.type.startsWith('image/')) { setErrorMsg('Please upload an image file.'); setState('error'); return; }
@@ -348,9 +421,17 @@
 
         return (
           <div className="min-h-screen py-8 px-4">
-            <div className="text-center mb-8">
+            <div className="relative text-center mb-8">
               <h1 className="text-3xl font-extrabold text-gray-800 tracking-tight">FoodScan</h1>
               <p className="text-gray-400 mt-1 text-sm">AI-powered food & calorie analyzer</p>
+              <div className="absolute top-0 right-0 flex items-center gap-2">
+                <span className="text-xs text-gray-500 font-medium hidden sm:inline">{auth.label}</span>
+                <button onClick={handleLogout}
+                  title="Выйти"
+                  className="w-8 h-8 rounded-full bg-green-100 hover:bg-red-100 text-green-700 hover:text-red-600 flex items-center justify-center text-sm font-bold transition-colors">
+                  ↩
+                </button>
+              </div>
             </div>
 
             <DailyCounter log={dailyLog} onClear={handleClearDay} />
