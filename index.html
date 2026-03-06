@@ -26,7 +26,6 @@
     <script type="text/babel">
       const { useState, useRef, useCallback } = React;
 
-      /* ── Daily Log helpers ────────────────────────────────────────── */
       function todayKey() {
         return 'foodscan_daily_' + new Date().toISOString().slice(0, 10);
       }
@@ -49,13 +48,11 @@
       async function analyzeImage(file) {
         const base64 = await fileToBase64(file);
         const mediaType = file.type || 'image/jpeg';
-
         const response = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ image_base64: base64, media_type: mediaType }),
         });
-
         if (!response.ok) {
           const err = await response.text();
           throw new Error(`API error ${response.status}: ${err}`);
@@ -64,7 +61,6 @@
         return JSON.parse(data.result);
       }
 
-      /* ── Skeleton ─────────────────────────────────────────────────── */
       function Skeleton() {
         return (
           <div className="space-y-3 w-full">
@@ -95,32 +91,50 @@
         );
       }
 
-      /* ── DailyLog ─────────────────────────────────────────────────── */
-      function DailyLog({ log, onClear }) {
+      /* ── DailyBanner ──────────────────────────────────────────────── */
+      function DailyBanner({ log, onClear }) {
+        const [open, setOpen] = useState(false);
         const total = log.reduce((s, e) => s + e.calories, 0);
-        if (log.length === 0) return null;
         return (
-          <div className="w-full max-w-md mx-auto mb-6 bg-white rounded-2xl border border-green-100 shadow-sm p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Today's Total</p>
-              <button onClick={onClear} className="text-xs text-gray-300 hover:text-red-400 transition-colors">Clear</button>
-            </div>
-            <ul className="space-y-1.5 mb-3">
-              {log.map((entry, i) => (
-                <li key={i} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2 text-gray-600">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-300 shrink-0" />
-                    <span>{entry.dish}</span>
-                    <span className="text-gray-300 text-xs">{entry.time}</span>
-                  </div>
-                  <span className="font-semibold text-gray-700 shrink-0">{entry.calories} kcal</span>
-                </li>
-              ))}
-            </ul>
-            <div className="flex items-center justify-between border-t border-green-50 pt-2">
-              <span className="text-sm font-semibold text-gray-500">Total</span>
-              <span className="text-lg font-extrabold text-green-600">{total} kcal</span>
-            </div>
+          <div className="w-full max-w-md mx-auto mb-6">
+            <button
+              onClick={() => setOpen(o => !o)}
+              className="w-full flex items-center justify-between bg-white border border-green-100 shadow-sm rounded-2xl px-4 py-3 transition-colors hover:bg-green-50 active:bg-green-100"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-green-500 text-base">🔥</span>
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Today's Calories</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-extrabold text-green-600">{total} <span className="text-sm font-semibold text-gray-400">kcal</span></span>
+                <span className={`text-gray-300 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
+              </div>
+            </button>
+            {open && (
+              <div className="bg-white border border-t-0 border-green-100 rounded-b-2xl shadow-sm px-4 pb-3">
+                {log.length === 0 ? (
+                  <p className="text-sm text-gray-300 text-center py-3">No meals saved yet</p>
+                ) : (
+                  <>
+                    <ul className="space-y-1.5 pt-3">
+                      {log.map((entry, i) => (
+                        <li key={i} className="flex items-center justify-between text-sm">
+                          <div className="flex items-center gap-2 text-gray-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-300 shrink-0" />
+                            <span>{entry.dish}</span>
+                            <span className="text-gray-300 text-xs">{entry.time}</span>
+                          </div>
+                          <span className="font-semibold text-gray-700 shrink-0">{entry.calories} kcal</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex justify-end mt-2 pt-2 border-t border-green-50">
+                      <button onClick={onClear} className="text-xs text-gray-300 hover:text-red-400 transition-colors">Clear all</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         );
       }
@@ -280,11 +294,10 @@
               <p className="text-gray-400 mt-1 text-sm">AI-powered food & calorie analyzer</p>
             </div>
 
+            <DailyBanner log={dailyLog} onClear={clearLog} />
+
             {state === 'idle' && (
-              <>
-                <DailyLog log={dailyLog} onClear={clearLog} />
-                <UploadZone onFile={handleFile} />
-              </>
+              <UploadZone onFile={handleFile} />
             )}
 
             {state === 'loading' && (
