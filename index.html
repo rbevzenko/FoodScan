@@ -58,7 +58,7 @@
           throw new Error(`API error ${response.status}: ${err}`);
         }
         const data = await response.json();
-        return JSON.parse(data.result);
+      return data.result;
       }
 
       function Skeleton() {
