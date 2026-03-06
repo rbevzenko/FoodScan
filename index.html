@@ -24,18 +24,9 @@
     <div id="root"></div>
 
     <script type="text/babel">
-      const { useState, useRef, useCallback } = React;
+      const { useState, useRef, useCallback, useEffect } = React;
 
-      function todayKey() {
-        return 'foodscan_daily_' + new Date().toISOString().slice(0, 10);
-      }
-      function loadDailyLog() {
-        try { return JSON.parse(localStorage.getItem(todayKey()) || '[]'); } catch { return []; }
-      }
-      function saveDailyLog(log) {
-        localStorage.setItem(todayKey(), JSON.stringify(log));
-      }
-
+      /* ── helpers ──────────────────────────────────────────────────── */
       function fileToBase64(file) {
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -46,21 +37,136 @@
       }
 
       async function analyzeImage(file) {
+        const apiKey = window.__ANTHROPIC_API_KEY__;
+        if (!apiKey) throw new Error('API key not configured.');
+
         const base64 = await fileToBase64(file);
         const mediaType = file.type || 'image/jpeg';
-        const response = await fetch('/api/analyze', {
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ image_base64: base64, media_type: mediaType }),
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-calls': 'true',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1024,
+            system: 'You are a nutrition expert. Analyze the food in this image and return ONLY valid JSON (no markdown) in this exact format: { "dish": "name", "totalCalories": 450, "confidence": "medium", "items": [{ "name": "chicken breast", "amount": "150g", "calories": 165 }], "macros": { "protein": 35, "carbs": 40, "fat": 12 }, "tip": "short health tip" }',
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+                { type: 'text', text: 'Analyze this food image.' },
+              ],
+            }],
+          }),
         });
+
         if (!response.ok) {
           const err = await response.text();
           throw new Error(`API error ${response.status}: ${err}`);
         }
         const data = await response.json();
-      return data.result;
+        return JSON.parse(data.content[0].text);
       }
 
+      /* ── Daily log helpers ────────────────────────────────────────── */
+      const DAILY_GOAL = 2000;
+      const STORAGE_KEY = 'foodscan_daily_log';
+
+      function todayStr() {
+        return new Date().toISOString().slice(0, 10);
+      }
+
+      function loadDailyLog() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed.date === todayStr()) return parsed;
+          }
+        } catch {}
+        return { date: todayStr(), meals: [] };
+      }
+
+      function saveDailyLog(log) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(log));
+      }
+
+      async function recalculateFromIngredients(items, dish) {
+        const apiKey = window.__ANTHROPIC_API_KEY__;
+        if (!apiKey) throw new Error('API key not configured.');
+
+        const ingredientList = items.map((i) => `${i.name}: ${i.amount}`).join(', ');
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-calls': 'true',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1024,
+            system: 'You are a nutrition expert. Calculate nutrition for the given ingredients and return ONLY valid JSON (no markdown) in this exact format: { "dish": "name", "totalCalories": 450, "confidence": "high", "items": [{ "name": "chicken breast", "amount": "150g", "calories": 165 }], "macros": { "protein": 35, "carbs": 40, "fat": 12 }, "tip": "short health tip" }',
+            messages: [{
+              role: 'user',
+              content: `Recalculate nutrition for "${dish}" with these ingredients: ${ingredientList}. Return only JSON.`,
+            }],
+          }),
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(`API error ${response.status}: ${err}`);
+        }
+        const data = await response.json();
+        return JSON.parse(data.content[0].text);
+      }
+
+      /* ── DailyCounter ─────────────────────────────────────────────── */
+      function DailyCounter({ log, onClear }) {
+        const total = log.meals.reduce((sum, m) => sum + m.calories, 0);
+        const pct = Math.min(100, (total / DAILY_GOAL) * 100);
+        const over = total > DAILY_GOAL;
+
+        return (
+          <div className="w-full max-w-md mx-auto mb-6 bg-white rounded-2xl shadow-sm border border-green-100 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-semibold text-gray-600">Today's calories</span>
+              <button onClick={onClear} className="text-xs text-gray-500 underline hover:text-red-500 transition-colors">
+                Reset day
+              </button>
+            </div>
+            <div className="flex items-end gap-1 mb-2">
+              <span className={`text-3xl font-extrabold leading-none ${over ? 'text-red-500' : 'text-green-600'}`}>{total}</span>
+              <span className="text-gray-400 text-sm mb-0.5">/ {DAILY_GOAL} kcal</span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
+              <div className={`h-2 rounded-full transition-all duration-700 ${over ? 'bg-red-400' : 'bg-green-400'}`} style={{ width: `${pct}%` }} />
+            </div>
+            {log.meals.length > 0 ? (
+              <ul className="space-y-1">
+                {log.meals.map((m) => (
+                  <li key={m.id} className="flex justify-between text-xs text-gray-500">
+                    <span className="truncate mr-2">{m.dish}</span>
+                    <span className="shrink-0 font-medium text-gray-700">{m.calories} kcal · {m.time}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-400 text-center">No meals logged yet today</p>
+            )}
+          </div>
+        );
+      }
+
+      /* ── Skeleton ─────────────────────────────────────────────────── */
       function Skeleton() {
         return (
           <div className="space-y-3 w-full">
@@ -71,11 +177,13 @@
         );
       }
 
+      /* ── ConfidenceBadge ──────────────────────────────────────────── */
       function ConfidenceBadge({ level }) {
         const style = { low: 'bg-red-100 text-red-700', medium: 'bg-yellow-100 text-yellow-700', high: 'bg-green-100 text-green-700' }[level] ?? 'bg-gray-100 text-gray-600';
         return <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${style}`}>{level} confidence</span>;
       }
 
+      /* ── MacroBar ─────────────────────────────────────────────────── */
       function MacroBar({ label, value, total, color }) {
         const pct = total > 0 ? Math.min(100, (value / total) * 100) : 0;
         return (
@@ -91,61 +199,38 @@
         );
       }
 
-      /* ── DailyBanner ──────────────────────────────────────────────── */
-      function DailyBanner({ log, onClear }) {
-        const [open, setOpen] = useState(false);
-        const total = log.reduce((s, e) => s + e.calories, 0);
-        return (
-          <div className="w-full max-w-md mx-auto mb-6">
-            <button
-              onClick={() => setOpen(o => !o)}
-              className="w-full flex items-center justify-between bg-white border border-green-100 shadow-sm rounded-2xl px-4 py-3 transition-colors hover:bg-green-50 active:bg-green-100"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-green-500 text-base">🔥</span>
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Today's Calories</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-extrabold text-green-600">{total} <span className="text-sm font-semibold text-gray-400">kcal</span></span>
-                <span className={`text-gray-300 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
-              </div>
-            </button>
-            {open && (
-              <div className="bg-white border border-t-0 border-green-100 rounded-b-2xl shadow-sm px-4 pb-3">
-                {log.length === 0 ? (
-                  <p className="text-sm text-gray-300 text-center py-3">No meals saved yet</p>
-                ) : (
-                  <>
-                    <ul className="space-y-1.5 pt-3">
-                      {log.map((entry, i) => (
-                        <li key={i} className="flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-2 text-gray-600">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-300 shrink-0" />
-                            <span>{entry.dish}</span>
-                            <span className="text-gray-300 text-xs">{entry.time}</span>
-                          </div>
-                          <span className="font-semibold text-gray-700 shrink-0">{entry.calories} kcal</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="flex justify-end mt-2 pt-2 border-t border-green-50">
-                      <button onClick={onClear} className="text-xs text-gray-300 hover:text-red-400 transition-colors">Clear all</button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      }
-
-      function ResultCard({ result, imageUrl, onReset, onSave, saved }) {
+      /* ── ResultCard ───────────────────────────────────────────────── */
+      function ResultCard({ result, imageUrl, onReset, onRecalculate }) {
         const total = result.macros.protein + result.macros.carbs + result.macros.fat;
+        const [adjusting, setAdjusting] = useState(false);
+        const [editItems, setEditItems] = useState(result.items);
+        const [newName, setNewName] = useState('');
+        const [newAmount, setNewAmount] = useState('');
+        const [recalcLoading, setRecalcLoading] = useState(false);
+
+        useEffect(() => { setEditItems(result.items); setAdjusting(false); }, [result]);
+
+        function updateItem(i, field, value) {
+          setEditItems((prev) => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
+        }
+        function removeItem(i) { setEditItems((prev) => prev.filter((_, idx) => idx !== i)); }
+        function addItem() {
+          if (!newName.trim()) return;
+          setEditItems((prev) => [...prev, { name: newName.trim(), amount: newAmount.trim() || '1 serving', calories: 0 }]);
+          setNewName(''); setNewAmount('');
+        }
+        async function handleRecalc() {
+          setRecalcLoading(true);
+          try { await onRecalculate(editItems, result.dish); }
+          finally { setRecalcLoading(false); }
+        }
+
         return (
           <div className="w-full max-w-md mx-auto space-y-4 pb-10">
             <div className="rounded-2xl overflow-hidden shadow-md">
               <img src={imageUrl} alt="food" className="w-full object-cover max-h-56" />
             </div>
+
             <div className="bg-white rounded-2xl shadow-sm border border-green-100 p-5 space-y-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -157,23 +242,60 @@
                   <div className="text-xs text-gray-400 mt-0.5">kcal</div>
                 </div>
               </div>
+
               <hr className="border-green-50" />
+
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Ingredients</p>
-                <ul className="space-y-1.5">
-                  {result.items.map((item, i) => (
-                    <li key={i} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2 text-gray-700">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                        <span>{item.name}</span>
-                        <span className="text-gray-400 text-xs">({item.amount})</span>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Ingredients</p>
+                  <button onClick={() => setAdjusting((v) => !v)} className="text-xs text-green-600 underline hover:text-green-800 transition-colors">
+                    {adjusting ? 'Cancel' : 'Adjust'}
+                  </button>
+                </div>
+
+                {!adjusting ? (
+                  <ul className="space-y-1.5">
+                    {result.items.map((item, i) => (
+                      <li key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 text-gray-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                          <span>{item.name}</span>
+                          <span className="text-gray-400 text-xs">({item.amount})</span>
+                        </div>
+                        <span className="font-semibold text-gray-800 shrink-0">{item.calories} kcal</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="space-y-2">
+                    {editItems.map((item, i) => (
+                      <div key={i} className="flex gap-1.5 items-center">
+                        <input value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)} placeholder="Ingredient"
+                          className="flex-1 min-w-0 text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-green-400" />
+                        <input value={item.amount} onChange={(e) => updateItem(i, 'amount', e.target.value)} placeholder="Amount"
+                          className="w-20 text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-green-400" />
+                        <button onClick={() => removeItem(i)} className="text-gray-300 hover:text-red-400 transition-colors text-lg leading-none px-1">×</button>
                       </div>
-                      <span className="font-semibold text-gray-800 shrink-0">{item.calories} kcal</span>
-                    </li>
-                  ))}
-                </ul>
+                    ))}
+                    <div className="flex gap-1.5 items-center pt-1">
+                      <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addItem()}
+                        placeholder="+ Add ingredient"
+                        className="flex-1 min-w-0 text-sm border border-dashed border-gray-300 rounded-lg px-2 py-1.5 outline-none focus:border-green-400" />
+                      <input value={newAmount} onChange={(e) => setNewAmount(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addItem()}
+                        placeholder="Amount"
+                        className="w-20 text-sm border border-dashed border-gray-300 rounded-lg px-2 py-1.5 outline-none focus:border-green-400" />
+                      <button onClick={addItem} className="text-green-500 hover:text-green-700 transition-colors text-xl leading-none px-1">+</button>
+                    </div>
+                    <button onClick={handleRecalc} disabled={recalcLoading || editItems.length === 0}
+                      className="w-full py-2 rounded-xl bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white font-semibold text-sm transition-colors mt-1">
+                      {recalcLoading ? 'Recalculating…' : 'Recalculate nutrition'}
+                    </button>
+                  </div>
+                )}
               </div>
+
               <hr className="border-green-50" />
+
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Macronutrients</p>
                 <div className="space-y-3">
@@ -182,38 +304,30 @@
                   <MacroBar label="Fat"     value={result.macros.fat}     total={total} color="bg-yellow-300" />
                 </div>
               </div>
+
               <hr className="border-green-50" />
+
               <div className="bg-green-50 rounded-xl p-3 flex gap-2">
                 <span className="text-green-500 text-lg shrink-0">💡</span>
                 <p className="text-sm text-green-800">{result.tip}</p>
               </div>
             </div>
-            <button
-              onClick={onSave}
-              disabled={saved}
-              className={`w-full py-3 rounded-2xl font-semibold text-sm transition-colors shadow-sm ${
-                saved
-                  ? 'bg-gray-100 text-gray-400 cursor-default'
-                  : 'bg-white border border-green-400 text-green-600 hover:bg-green-50 active:bg-green-100'
-              }`}
-            >
-              {saved ? '✓ Saved to Today\'s Total' : 'Save to Today\'s Total'}
-            </button>
-            <button
-              onClick={onReset}
-              className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm"
-            >
+
+            <button onClick={onReset}
+              className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm">
               Analyze Another
             </button>
           </div>
         );
       }
 
+      /* ── UploadZone ───────────────────────────────────────────────── */
       function UploadZone({ onFile }) {
         const [dragging, setDragging] = useState(false);
         const fileRef   = useRef(null);
         const cameraRef = useRef(null);
         const pick = (e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; };
+
         return (
           <div className="w-full max-w-md mx-auto space-y-4">
             <div
@@ -233,10 +347,8 @@
               <p className="text-xs text-gray-300">PNG · JPG · WEBP · HEIC</p>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pick} />
             </div>
-            <button
-              onClick={() => cameraRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors"
-            >
+            <button onClick={() => cameraRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors">
               <span className="text-lg">📷</span> Take a Photo
             </button>
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={pick} />
@@ -244,48 +356,86 @@
         );
       }
 
+      /* ── ApiKeyPrompt ─────────────────────────────────────────────── */
+      function ApiKeyPrompt({ onKey }) {
+        const [val, setVal] = useState('');
+        return (
+          <div className="w-full max-w-md mx-auto bg-white rounded-2xl border border-green-100 shadow-sm p-6 space-y-4">
+            <div className="text-center">
+              <div className="text-4xl mb-2">🔑</div>
+              <h2 className="font-bold text-gray-800">Enter Anthropic API Key</h2>
+              <p className="text-xs text-gray-400 mt-1">Stored in memory only — never sent anywhere else</p>
+            </div>
+            <input type="password" value={val} onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && val.trim() && onKey(val.trim())}
+              placeholder="sk-ant-..."
+              className="w-full border border-green-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-green-300" />
+            <button onClick={() => val.trim() && onKey(val.trim())}
+              className="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors">
+              Start Analyzing
+            </button>
+          </div>
+        );
+      }
+
+      /* ── App ──────────────────────────────────────────────────────── */
       function App() {
-        const [state,    setState]   = useState('idle');
-        const [result,   setResult]  = useState(null);
+        const [state,    setState]    = useState('key');
+        const [result,   setResult]   = useState(null);
         const [imageUrl, setImageUrl] = useState('');
         const [errorMsg, setErrorMsg] = useState('');
         const [dailyLog, setDailyLog] = useState(() => loadDailyLog());
-        const [saved,    setSaved]   = useState(false);
+
+        const setKey = useCallback((key) => { window.__ANTHROPIC_API_KEY__ = key; setState('idle'); }, []);
 
         const handleFile = useCallback(async (file) => {
           if (!file.type.startsWith('image/')) { setErrorMsg('Please upload an image file.'); setState('error'); return; }
           setImageUrl(URL.createObjectURL(file));
           setState('loading');
-          setSaved(false);
           try {
             const data = await analyzeImage(file);
             setResult(data);
             setState('result');
+            setDailyLog((prev) => {
+              const updated = { ...prev, meals: [...prev.meals, {
+                id: Date.now().toString(), dish: data.dish, calories: data.totalCalories,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              }]};
+              saveDailyLog(updated);
+              return updated;
+            });
           } catch (err) {
             setErrorMsg(err.message || 'Something went wrong.');
             setState('error');
           }
         }, []);
 
-        const handleSave = useCallback(() => {
-          if (!result || saved) return;
-          const entry = {
-            dish: result.dish,
-            calories: result.totalCalories,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          };
-          const updated = [...loadDailyLog(), entry];
-          saveDailyLog(updated);
-          setDailyLog(updated);
-          setSaved(true);
-        }, [result, saved]);
-
-        const clearLog = useCallback(() => {
-          saveDailyLog([]);
-          setDailyLog([]);
+        const handleRecalculate = useCallback(async (items, dish) => {
+          setState('loading');
+          try {
+            const data = await recalculateFromIngredients(items, dish);
+            setResult(data);
+            setState('result');
+            setDailyLog((prev) => {
+              const meals = [...prev.meals];
+              if (meals.length > 0) meals[meals.length - 1] = { ...meals[meals.length - 1], dish: data.dish, calories: data.totalCalories };
+              const updated = { ...prev, meals };
+              saveDailyLog(updated);
+              return updated;
+            });
+          } catch (err) {
+            setErrorMsg(err.message || 'Something went wrong.');
+            setState('error');
+          }
         }, []);
 
-        const reset = useCallback(() => { setResult(null); setImageUrl(''); setErrorMsg(''); setSaved(false); setState('idle'); }, []);
+        const handleClearDay = useCallback(() => {
+          const fresh = { date: todayStr(), meals: [] };
+          saveDailyLog(fresh);
+          setDailyLog(fresh);
+        }, []);
+
+        const reset = useCallback(() => { setResult(null); setImageUrl(''); setErrorMsg(''); setState('idle'); }, []);
 
         return (
           <div className="min-h-screen py-8 px-4">
@@ -294,11 +444,9 @@
               <p className="text-gray-400 mt-1 text-sm">AI-powered food & calorie analyzer</p>
             </div>
 
-            <DailyBanner log={dailyLog} onClear={clearLog} />
-
-            {state === 'idle' && (
-              <UploadZone onFile={handleFile} />
-            )}
+            {state === 'key' && <ApiKeyPrompt onKey={setKey} />}
+            {state !== 'key' && <DailyCounter log={dailyLog} onClear={handleClearDay} />}
+            {state === 'idle' && <UploadZone onFile={handleFile} />}
 
             {state === 'loading' && (
               <div className="w-full max-w-md mx-auto space-y-4">
@@ -310,9 +458,7 @@
               </div>
             )}
 
-            {state === 'result' && result && (
-              <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onSave={handleSave} saved={saved} />
-            )}
+            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onRecalculate={handleRecalculate} />}
 
             {state === 'error' && (
               <div className="w-full max-w-md mx-auto space-y-4">
