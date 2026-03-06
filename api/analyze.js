@@ -2,31 +2,31 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in Vercel environment variables' });
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' });
 
-  const { image_base64, media_type = 'image/jpeg' } = req.body;
-  if (!image_base64) return res.status(400).json({ error: 'image_base64 is required' });
+  const { image_base64, media_type, ingredients, dish } = req.body;
+
+  let system, messages;
+
+  if (image_base64) {
+    system = 'You are a nutrition expert. Analyze the food in this image and return ONLY valid JSON (no markdown) in this exact format: { "dish": "name", "totalCalories": 450, "confidence": "medium", "items": [{ "name": "chicken breast", "amount": "150g", "calories": 165 }], "macros": { "protein": 35, "carbs": 40, "fat": 12 }, "tip": "short health tip" }';
+    messages = [{ role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: media_type || 'image/jpeg', data: image_base64 } },
+      { type: 'text', text: 'Analyze this food image.' },
+    ]}];
+  } else if (ingredients && dish) {
+    const list = ingredients.map(i => `${i.name}: ${i.amount}`).join(', ');
+    system = 'You are a nutrition expert. Calculate nutrition for the given ingredients and return ONLY valid JSON (no markdown) in this exact format: { "dish": "name", "totalCalories": 450, "confidence": "high", "items": [{ "name": "chicken breast", "amount": "150g", "calories": 165 }], "macros": { "protein": 35, "carbs": 40, "fat": 12 }, "tip": "short health tip" }';
+    messages = [{ role: 'user', content: `Recalculate nutrition for "${dish}" with these ingredients: ${list}. Return only JSON.` }];
+  } else {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system: 'You are a nutrition expert. Analyze the food in the image and return ONLY a raw JSON object with no markdown, no code fences, no extra text. Use exactly this structure: {"dish":"name","totalCalories":450,"confidence":"medium","items":[{"name":"chicken breast","amount":"150g","calories":165}],"macros":{"protein":35,"carbs":40,"fat":12},"tip":"short health tip"}',
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type, data: image_base64 } },
-            { type: 'text', text: 'Analyze this food image and return only the JSON.' },
-          ],
-        }],
-      }),
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, system, messages }),
     });
 
     if (!response.ok) {
@@ -35,20 +35,11 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    const raw = data.content[0].text;
-
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) return res.status(500).json({ error: 'No JSON in response', raw });
-
-    let parsed;
-    try {
-      parsed = JSON.parse(match[0]);
-    } catch (e) {
-      return res.status(500).json({ error: 'JSON parse failed', raw });
-    }
-
-    res.json({ result: parsed });
+    const text = data.content[0].text;
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return res.status(500).json({ error: 'No JSON in response' });
+    res.json(JSON.parse(match[0]));
   } catch (e) {
-    res.status(500).json({ error: e.message || 'Internal server error' });
+    res.status(500).json({ error: e.message });
   }
 }
