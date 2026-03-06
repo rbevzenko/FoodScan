@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="#22c55e"/>
+
+  <!-- Plate circle -->
+  <circle cx="256" cy="272" r="148" fill="#ffffff" opacity="0.15"/>
+  <circle cx="256" cy="272" r="120" fill="#ffffff" opacity="0.15"/>
+
+  <!-- Fork (left) -->
+  <g fill="#ffffff">
+    <!-- Fork handle -->
+    <rect x="176" y="320" width="18" height="80" rx="9"/>
+    <!-- Fork tines -->
+    <rect x="170" y="160" width="6" height="80" rx="3"/>
+    <rect x="182" y="160" width="6" height="80" rx="3"/>
+    <rect x="194" y="160" width="6" height="80" rx="3"/>
+    <!-- Fork neck -->
+    <rect x="170" y="240" width="30" height="30" rx="4"/>
+    <rect x="176" y="268" width="18" height="55" rx="4"/>
+  </g>
+
+  <!-- Leaf / scan icon (center) -->
+  <g fill="#ffffff">
+    <!-- Leaf shape -->
+    <path d="M256 180 C256 180 300 210 300 258 C300 290 280 312 256 320 C232 312 212 290 212 258 C212 210 256 180 256 180Z" opacity="0.95"/>
+    <!-- Vein -->
+    <line x1="256" y1="195" x2="256" y2="315" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/>
+    <line x1="256" y1="230" x2="238" y2="248" stroke="#22c55e" stroke-width="3" stroke-linecap="round"/>
+    <line x1="256" y1="255" x2="235" y2="268" stroke="#22c55e" stroke-width="3" stroke-linecap="round"/>
+    <line x1="256" y1="230" x2="274" y2="248" stroke="#22c55e" stroke-width="3" stroke-linecap="round"/>
+    <line x1="256" y1="255" x2="277" y2="268" stroke="#22c55e" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- Knife (right) -->
+  <g fill="#ffffff">
+    <!-- Knife handle -->
+    <rect x="318" y="320" width="18" height="80" rx="9"/>
+    <!-- Knife blade -->
+    <path d="M318 160 L336 160 L336 290 Q327 300 318 290 Z" rx="4"/>
+  </g>
+
+  <!-- Scan lines overlay -->
+  <rect x="148" y="248" width="216" height="4" rx="2" fill="#ffffff" opacity="0.5"/>
+  <rect x="148" y="260" width="216" height="2" rx="1" fill="#ffffff" opacity="0.3"/>
+  <rect x="148" y="270" width="216" height="2" rx="1" fill="#ffffff" opacity="0.3"/>
+
+  <!-- Corner scan brackets -->
+  <g stroke="#ffffff" stroke-width="8" fill="none" stroke-linecap="round" opacity="0.8">
+    <path d="M148 210 L148 180 L178 180"/>
+    <path d="M364 210 L364 180 L334 180"/>
+    <path d="M148 330 L148 360 L178 360"/>
+    <path d="M364 330 L364 360 L334 360"/>
+  </g>
+</svg>
