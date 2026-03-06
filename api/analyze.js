@@ -34,5 +34,9 @@ export default async function handler(req, res) {
   }
 
   const data = await response.json();
-  res.json({ result: data.content[0].text });
+  const raw = data.content[0].text;
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return res.status(500).json({ error: 'No JSON found in model response', raw });
+  const parsed = JSON.parse(match[0]);
+  res.json({ result: parsed });
 }
