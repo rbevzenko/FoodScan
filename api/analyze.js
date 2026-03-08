@@ -4,11 +4,14 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' });
 
-  const { image_base64, media_type, ingredients, dish } = req.body;
+  const { image_base64, media_type, ingredients, dish, clarification, currentResult } = req.body;
 
   let system, messages;
 
-  if (image_base64) {
+  if (clarification && currentResult) {
+    system = 'You are a nutrition expert. You will be given a previous food analysis and a user clarification. Revise the analysis accordingly and return ONLY valid JSON (no markdown) in this exact format: { "dish": "name", "totalCalories": 450, "confidence": "high", "items": [{ "name": "chicken breast", "amount": "150g", "calories": 165 }], "macros": { "protein": 35, "carbs": 40, "fat": 12 }, "tip": "short health tip" }';
+    messages = [{ role: 'user', content: `Previous analysis: ${JSON.stringify(currentResult)}\n\nUser clarification: "${clarification}"\n\nRevise the nutrition analysis based on the clarification. Return only JSON.` }];
+  } else if (image_base64) {
     system = 'You are a nutrition expert. Analyze the food in this image and return ONLY valid JSON (no markdown) in this exact format: { "dish": "name", "totalCalories": 450, "confidence": "medium", "items": [{ "name": "chicken breast", "amount": "150g", "calories": 165 }], "macros": { "protein": 35, "carbs": 40, "fat": 12 }, "tip": "short health tip" }';
     messages = [{ role: 'user', content: [
       { type: 'image', source: { type: 'base64', media_type: media_type || 'image/jpeg', data: image_base64 } },
@@ -21,6 +24,7 @@ export default async function handler(req, res) {
   } else {
     return res.status(400).json({ error: 'Invalid request' });
   }
+
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
