@@ -479,10 +479,10 @@
               <p className="text-gray-400 mt-1 text-sm">AI-powered food & calorie analyzer</p>
               <div className="absolute top-0 right-0 flex items-center gap-2">
                 <span className="text-xs text-gray-500 font-medium hidden sm:inline">{auth.label}</span>
-                <button onClick={handleLogout}
+                <button onClick={() => { if (window.confirm('Выйти из аккаунта?')) handleLogout(); }}
                   title="Выйти"
-                  className="w-8 h-8 rounded-full bg-green-100 hover:bg-red-100 text-green-700 hover:text-red-600 flex items-center justify-center text-sm font-bold transition-colors">
-                  ↩
+                  className="flex items-center gap-1 px-3 h-8 rounded-full bg-green-100 hover:bg-red-100 text-green-700 hover:text-red-600 text-xs font-semibold transition-colors">
+                  ↩ Выход
                 </button>
               </div>
             </div>
