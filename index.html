@@ -122,6 +122,16 @@
         return res.json();
       }
 
+      async function clarifyResult(currentResult, clarification) {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ clarification, currentResult }),
+        });
+        if (!res.ok) throw new Error(`Error ${res.status}`);
+        return res.json();
+      }
+
       async function recalculateFromIngredients(items, dish) {
         const res = await fetch('/api/analyze', {
           method: 'POST',
@@ -214,15 +224,17 @@
       }
 
       /* ── ResultCard ───────────────────────────────────────────────── */
-      function ResultCard({ result, imageUrl, onReset, onRecalculate, onAddToLog }) {
+      function ResultCard({ result, imageUrl, onReset, onRecalculate, onAddToLog, onClarify }) {
         const total = result.macros.protein + result.macros.carbs + result.macros.fat;
         const [adjusting, setAdjusting] = useState(false);
         const [editItems, setEditItems] = useState(result.items);
         const [newName, setNewName] = useState('');
         const [newAmount, setNewAmount] = useState('');
         const [recalcLoading, setRecalcLoading] = useState(false);
+        const [clarifyText, setClarifyText] = useState('');
+        const [clarifyLoading, setClarifyLoading] = useState(false);
 
-        useEffect(() => { setEditItems(result.items); setAdjusting(false); }, [result]);
+        useEffect(() => { setEditItems(result.items); setAdjusting(false); setClarifyText(''); }, [result]);
 
         function updateItem(i, field, value) {
           setEditItems((prev) => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
@@ -237,6 +249,12 @@
           setRecalcLoading(true);
           try { await onRecalculate(editItems, result.dish); }
           finally { setRecalcLoading(false); }
+        }
+        async function handleClarify() {
+          if (!clarifyText.trim()) return;
+          setClarifyLoading(true);
+          try { await onClarify(result, clarifyText.trim()); }
+          finally { setClarifyLoading(false); }
         }
 
         return (
@@ -314,6 +332,26 @@
               <div className="bg-green-50 rounded-xl p-3 flex gap-2">
                 <span className="text-green-500 text-lg shrink-0">💡</span>
                 <p className="text-sm text-green-800">{result.tip}</p>
+              </div>
+              <hr className="border-green-50" />
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Уточнение для ИИ</p>
+                <div className="flex gap-2">
+                  <input
+                    value={clarifyText}
+                    onChange={e => setClarifyText(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleClarify()}
+                    placeholder="«двойная порция», «жареное в масле», «без соуса»…"
+                    className="flex-1 min-w-0 text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-green-400 transition-colors"
+                  />
+                  <button
+                    onClick={handleClarify}
+                    disabled={!clarifyText.trim() || clarifyLoading}
+                    className="px-4 py-2 rounded-xl bg-green-500 hover:bg-green-600 disabled:bg-green-200 text-white font-semibold text-sm transition-colors shrink-0"
+                  >
+                    {clarifyLoading ? '…' : 'Пересчитать'}
+                  </button>
+                </div>
               </div>
             </div>
             <div className="flex gap-3">
@@ -409,6 +447,18 @@
 
         const reset = useCallback(() => { setResult(null); setImageUrl(''); setErrorMsg(''); setState('idle'); }, []);
 
+        const handleClarify = useCallback(async (currentResult, clarification) => {
+          setState('loading');
+          try {
+            const data = await clarifyResult(currentResult, clarification);
+            setResult(data);
+            setState('result');
+          } catch (err) {
+            setErrorMsg(err.message || 'Something went wrong.');
+            setState('error');
+          }
+        }, []);
+
         const handleAddToLog = useCallback(() => {
           if (!result) return;
           setDailyLog((prev) => {
@@ -451,7 +501,7 @@
               </div>
             )}
 
-            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onRecalculate={handleRecalculate} onAddToLog={handleAddToLog} />}
+            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onRecalculate={handleRecalculate} onAddToLog={handleAddToLog} onClarify={handleClarify} />}
 
             {state === 'error' && (
               <div className="w-full max-w-md mx-auto space-y-4">
