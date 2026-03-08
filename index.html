@@ -214,7 +214,7 @@
       }
 
       /* ── ResultCard ───────────────────────────────────────────────── */
-      function ResultCard({ result, imageUrl, onReset, onRecalculate }) {
+      function ResultCard({ result, imageUrl, onReset, onRecalculate, onAddToLog }) {
         const total = result.macros.protein + result.macros.carbs + result.macros.fat;
         const [adjusting, setAdjusting] = useState(false);
         const [editItems, setEditItems] = useState(result.items);
@@ -316,9 +316,14 @@
                 <p className="text-sm text-green-800">{result.tip}</p>
               </div>
             </div>
-            <button onClick={onReset} className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm">
-              Analyze Another
-            </button>
+            <div className="flex gap-3">
+              <button onClick={onReset} className="flex-1 py-3 rounded-2xl border border-gray-200 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-600 font-semibold text-sm transition-colors">
+                Не добавлять
+              </button>
+              <button onClick={onAddToLog} className="flex-1 py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-semibold text-sm transition-colors shadow-sm">
+                Добавить
+              </button>
+            </div>
           </div>
         );
       }
@@ -379,14 +384,6 @@
             const data = await analyzeImage(file);
             setResult(data);
             setState('result');
-            setDailyLog((prev) => {
-              const updated = { ...prev, meals: [...prev.meals, {
-                id: Date.now().toString(), dish: data.dish, calories: data.totalCalories,
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              }]};
-              saveDailyLog(updated);
-              return updated;
-            });
           } catch (err) {
             setErrorMsg(err.message || 'Something went wrong.');
             setState('error');
@@ -399,13 +396,6 @@
             const data = await recalculateFromIngredients(items, dish);
             setResult(data);
             setState('result');
-            setDailyLog((prev) => {
-              const meals = [...prev.meals];
-              if (meals.length > 0) meals[meals.length - 1] = { ...meals[meals.length - 1], dish: data.dish, calories: data.totalCalories };
-              const updated = { ...prev, meals };
-              saveDailyLog(updated);
-              return updated;
-            });
           } catch (err) {
             setErrorMsg(err.message || 'Something went wrong.');
             setState('error');
@@ -418,6 +408,19 @@
         }, []);
 
         const reset = useCallback(() => { setResult(null); setImageUrl(''); setErrorMsg(''); setState('idle'); }, []);
+
+        const handleAddToLog = useCallback(() => {
+          if (!result) return;
+          setDailyLog((prev) => {
+            const updated = { ...prev, meals: [...prev.meals, {
+              id: Date.now().toString(), dish: result.dish, calories: result.totalCalories,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }]};
+            saveDailyLog(updated);
+            return updated;
+          });
+          reset();
+        }, [result, reset]);
 
         return (
           <div className="min-h-screen py-8 px-4">
@@ -448,7 +451,7 @@
               </div>
             )}
 
-            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onRecalculate={handleRecalculate} />}
+            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onRecalculate={handleRecalculate} onAddToLog={handleAddToLog} />}
 
             {state === 'error' && (
               <div className="w-full max-w-md mx-auto space-y-4">
