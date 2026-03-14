@@ -1,9 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/:path*" },
-    { "source": "/gothic-reader", "destination": "/gothic-reader/index.html" },
-    { "source": "/gothic-reader/(.*)", "destination": "/gothic-reader/index.html" },
-    { "source": "/((?!gothic-reader).*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {
