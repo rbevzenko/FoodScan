@@ -577,6 +577,32 @@ async function getImageUrlsFromManifest(id, pageNum) {
     } catch (e) { console.log('[preview] manifest error', e.message); }
   }
 
+  // Step 3: Retry manifest via server-side proxy (works on Vercel, 404s on GitHub Pages)
+  const proxyBase = `${location.origin}/api/dlc-image`;
+  const manifestToProxy = `https://dlc.mpg.de/api/v2/records/${id}/manifest/`;
+  try {
+    const pr = await fetch(`${proxyBase}?url=${encodeURIComponent(manifestToProxy)}`);
+    if (pr.ok) {
+      const text = await pr.text();
+      if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+        const manifest = JSON.parse(text);
+        const idx = pageNum - 1;
+        const canvases = manifest?.sequences?.[0]?.canvases;
+        if (canvases?.[idx]) {
+          const resource = canvases[idx]?.images?.[0]?.resource;
+          const svcId = resource?.service?.['@id'] || resource?.service?.[0]?.['@id'];
+          if (svcId) return { fullUrl: `${svcId}/full/!1500,2000/0/default.jpg`, thumbUrl: `${svcId}/full/!400,400/0/default.jpg` };
+          if (resource?.['@id']) return { fullUrl: resource['@id'], thumbUrl: resource['@id'] };
+        }
+        const items = manifest?.items;
+        if (items?.[pageNum - 1]) {
+          const embedded = imageFromCanvas(items[pageNum - 1]);
+          if (embedded) return embedded;
+        }
+      }
+    }
+  } catch (_) {}
+
   return null;
 }
 
@@ -697,16 +723,25 @@ async function loadFromUrl(url) {
     iframe.style.cssText = 'width:100%;min-height:480px;border:none;display:block;';
     iframe.title = 'DLC viewer';
 
-    // Give the iframe a short time to load; if it's blocked by X-Frame-Options the
-    // browser fires no useful event, but the image will be visible if embedding works.
     img.style.display = 'none';
-    origEmpty.style.display = 'none';
+
+    // Show a helper message while iframe loads; update once it finishes
+    origEmpty.innerHTML =
+      'Загружаю просмотрщик DLC…<br>' +
+      `<small style="opacity:.7">Если изображение не появится, <a href="${viewerUrl}" target="_blank" style="color:var(--gold)">откройте оригинал ↗</a></small>`;
+    origEmpty.style.display = 'block';
+
     img.parentNode.appendChild(iframe);
 
-    // Also show a small "open original" link below the iframe
+    iframe.addEventListener('load', () => {
+      // Hide the helper text once the iframe reports it loaded
+      origEmpty.style.display = 'none';
+    });
+
+    // Prominent open link always visible below the iframe
     const linkDiv = document.createElement('div');
-    linkDiv.style.cssText = 'text-align:center;padding:0.4rem;font-size:0.8rem;';
-    linkDiv.innerHTML = `<a href="${viewerUrl}" target="_blank" style="color:var(--gold)">Открыть оригинал ↗</a>`;
+    linkDiv.style.cssText = 'text-align:center;padding:0.6rem;font-size:0.85rem;';
+    linkDiv.innerHTML = `<a href="${viewerUrl}" target="_blank" style="color:var(--gold);font-weight:600">Открыть оригинал в новой вкладке ↗</a>`;
     img.parentNode.appendChild(linkDiv);
   })();
 
