@@ -132,6 +132,16 @@
         return res.json();
       }
 
+      async function getDailyAdvice(meals) {
+        const res = await fetch('/api/daily-advice', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ meals }),
+        });
+        if (!res.ok) throw new Error(`Error ${res.status}`);
+        return res.json();
+      }
+
       async function recalculateFromIngredients(items, dish) {
         const res = await fetch('/api/analyze', {
           method: 'POST',
@@ -158,8 +168,71 @@
 
       function saveDailyLog(log) { localStorage.setItem(STORAGE_KEY, JSON.stringify(log)); }
 
+      /* ── DailyAdviceCard ──────────────────────────────────────────── */
+      function DailyAdviceCard({ advice, onClose }) {
+        const statusStyle = {
+          excellent: { bg: 'bg-green-50', border: 'border-green-200', badge: 'bg-green-100 text-green-700', label: 'Отлично!' },
+          good:      { bg: 'bg-blue-50',  border: 'border-blue-200',  badge: 'bg-blue-100 text-blue-700',   label: 'Хорошо' },
+          warning:   { bg: 'bg-yellow-50',border: 'border-yellow-200',badge: 'bg-yellow-100 text-yellow-700',label: 'Внимание' },
+          danger:    { bg: 'bg-red-50',   border: 'border-red-200',   badge: 'bg-red-100 text-red-700',     label: 'Стоп!' },
+        }[advice.status] ?? { bg: 'bg-gray-50', border: 'border-gray-200', badge: 'bg-gray-100 text-gray-700', label: '' };
+
+        const scoreColor = advice.score >= 80 ? 'text-green-600' : advice.score >= 60 ? 'text-blue-600' : advice.score >= 40 ? 'text-yellow-600' : 'text-red-600';
+
+        return (
+          <div className={`w-full max-w-md mx-auto mb-6 rounded-2xl shadow-sm border ${statusStyle.border} ${statusStyle.bg} p-5 space-y-4`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🤖</span>
+                <span className="font-bold text-gray-800 text-sm">Анализ дня от ИИ</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-2xl font-extrabold leading-none ${scoreColor}`}>{advice.score}</span>
+                <span className="text-xs text-gray-400">/100</span>
+                <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-semibold ${statusStyle.badge}`}>{statusStyle.label}</span>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-700 leading-relaxed">{advice.summary}</p>
+
+            <div className="bg-white bg-opacity-60 rounded-xl p-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Калории</p>
+              <p className="text-sm text-gray-700">{advice.calories_comment}</p>
+            </div>
+
+            {advice.advice && advice.advice.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Рекомендации</p>
+                <ul className="space-y-2">
+                  {advice.advice.map((tip, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                      <span className="text-green-500 shrink-0 mt-0.5">✓</span>
+                      <span>{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {advice.tomorrow_tip && (
+              <div className="bg-white bg-opacity-60 rounded-xl p-3 flex gap-2">
+                <span className="text-lg shrink-0">🌅</span>
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-0.5">На завтра</p>
+                  <p className="text-sm text-gray-700">{advice.tomorrow_tip}</p>
+                </div>
+              </div>
+            )}
+
+            <button onClick={onClose} className="w-full py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-500 text-xs font-semibold transition-colors">
+              Скрыть анализ
+            </button>
+          </div>
+        );
+      }
+
       /* ── DailyCounter ─────────────────────────────────────────────── */
-      function DailyCounter({ log, onClear }) {
+      function DailyCounter({ log, onClear, onAnalyze, analyzing }) {
         const total = log.meals.reduce((sum, m) => sum + m.calories, 0);
         const pct = Math.min(100, (total / DAILY_GOAL) * 100);
         const over = total > DAILY_GOAL;
@@ -177,7 +250,7 @@
               <div className={`h-2 rounded-full transition-all duration-700 ${over ? 'bg-red-400' : 'bg-green-400'}`} style={{ width: `${pct}%` }} />
             </div>
             {log.meals.length > 0 ? (
-              <ul className="space-y-1">
+              <ul className="space-y-1 mb-3">
                 {log.meals.map((m) => (
                   <li key={m.id} className="flex justify-between text-xs text-gray-500">
                     <span className="truncate mr-2">{m.dish}</span>
@@ -186,8 +259,19 @@
                 ))}
               </ul>
             ) : (
-              <p className="text-xs text-gray-400 text-center">No meals logged yet today</p>
+              <p className="text-xs text-gray-400 text-center mb-3">No meals logged yet today</p>
             )}
+            <button
+              onClick={onAnalyze}
+              disabled={analyzing || log.meals.length === 0}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-green-200 disabled:to-green-200 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2"
+            >
+              {analyzing ? (
+                <><span className="animate-spin">⏳</span> ИИ анализирует…</>
+              ) : (
+                <><span>🤖</span> Анализ дня от ИИ</>
+              )}
+            </button>
           </div>
         );
       }
@@ -402,15 +486,30 @@
 
       /* ── App ──────────────────────────────────────────────────────── */
       function App() {
-        const [auth,     setAuth]     = useState(() => loadAuth());
-        const [state,    setState]    = useState('idle');
-        const [result,   setResult]   = useState(null);
-        const [imageUrl, setImageUrl] = useState('');
-        const [errorMsg, setErrorMsg] = useState('');
-        const [dailyLog, setDailyLog] = useState(() => loadDailyLog());
+        const [auth,        setAuth]        = useState(() => loadAuth());
+        const [state,       setState]       = useState('idle');
+        const [result,      setResult]      = useState(null);
+        const [imageUrl,    setImageUrl]    = useState('');
+        const [errorMsg,    setErrorMsg]    = useState('');
+        const [dailyLog,    setDailyLog]    = useState(() => loadDailyLog());
+        const [advice,      setAdvice]      = useState(null);
+        const [analyzing,   setAnalyzing]   = useState(false);
 
         function handleLogin(user) { saveAuth(user); setAuth(user); }
-        function handleLogout() { clearAuth(); setAuth(null); setState('idle'); setResult(null); setImageUrl(''); setErrorMsg(''); }
+        function handleLogout() { clearAuth(); setAuth(null); setState('idle'); setResult(null); setImageUrl(''); setErrorMsg(''); setAdvice(null); }
+
+        const handleAnalyzeDay = useCallback(async () => {
+          setAnalyzing(true);
+          setAdvice(null);
+          try {
+            const data = await getDailyAdvice(dailyLog.meals);
+            setAdvice(data);
+          } catch (err) {
+            setErrorMsg(err.message || 'Не удалось получить анализ.');
+          } finally {
+            setAnalyzing(false);
+          }
+        }, [dailyLog.meals]);
 
         if (!auth) return <LoginScreen onLogin={handleLogin} />;
 
@@ -487,7 +586,9 @@
               </div>
             </div>
 
-            <DailyCounter log={dailyLog} onClear={handleClearDay} />
+            <DailyCounter log={dailyLog} onClear={handleClearDay} onAnalyze={handleAnalyzeDay} analyzing={analyzing} />
+
+            {advice && <DailyAdviceCard advice={advice} onClose={() => setAdvice(null)} />}
 
             {state === 'idle' && <UploadZone onFile={handleFile} />}
 
