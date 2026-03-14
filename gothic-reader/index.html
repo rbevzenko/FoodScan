@@ -652,7 +652,24 @@ async function loadFromUrl(url) {
       } catch (_) {}
     }
 
-    // Pass 2: img.src directly with no-referrer policy.
+    // Pass 2: server-side proxy at /api/dlc-image (available when hosted on Vercel).
+    // The proxy fetches the image server-side, bypassing Cloudflare bot protection.
+    // On GitHub Pages this endpoint 404s and we silently move on.
+    const proxyBase = `${location.origin}/api/dlc-image`;
+    for (const u of candidates) {
+      try {
+        const r = await fetch(`${proxyBase}?url=${encodeURIComponent(u)}`);
+        if (!r.ok) continue;
+        const blob = await r.blob();
+        if (!blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') continue;
+        img.src = URL.createObjectURL(blob);
+        img.style.display = 'block';
+        origEmpty.style.display = 'none';
+        return;
+      } catch (_) {}
+    }
+
+    // Pass 3: img.src directly with no-referrer policy.
     // The #orig-img element has referrerpolicy="no-referrer"; the test Image must match,
     // otherwise DLC blocks the probe (referrer = github.io) while the real img would succeed.
     for (const u of candidates) {
@@ -671,15 +688,26 @@ async function loadFromUrl(url) {
       }
     }
 
-    // All failed — show debug info + link
+    // All direct loading attempts failed.
+    // Fallback: embed the DLC viewer in an iframe — loads from dlc.mpg.de origin so
+    // bot-protection cookies are available and images display correctly.
+    const viewerUrl = `https://dlc.mpg.de/fullscreen/${id}/${pageNum}/`;
+    const iframe = document.createElement('iframe');
+    iframe.src = viewerUrl;
+    iframe.style.cssText = 'width:100%;min-height:480px;border:none;display:block;';
+    iframe.title = 'DLC viewer';
+
+    // Give the iframe a short time to load; if it's blocked by X-Frame-Options the
+    // browser fires no useful event, but the image will be visible if embedding works.
     img.style.display = 'none';
-    origEmpty.innerHTML = `<div style="padding:1rem;text-align:center;font-size:0.85rem;color:var(--ink)">
-      Предпросмотр недоступен<br>
-      <small style="opacity:.6;word-break:break-all">${candidates.map((u,i)=>`[${i}] ${u}`).join('<br>')}</small><br>
-      <a href="https://dlc.mpg.de/fullscreen/${id}/${pageNum}/" target="_blank"
-        style="color:var(--gold)">Открыть оригинал ↗</a>
-    </div>`;
-    origEmpty.style.display = 'block';
+    origEmpty.style.display = 'none';
+    img.parentNode.appendChild(iframe);
+
+    // Also show a small "open original" link below the iframe
+    const linkDiv = document.createElement('div');
+    linkDiv.style.cssText = 'text-align:center;padding:0.4rem;font-size:0.8rem;';
+    linkDiv.innerHTML = `<a href="${viewerUrl}" target="_blank" style="color:var(--gold)">Открыть оригинал ↗</a>`;
+    img.parentNode.appendChild(linkDiv);
   })();
 
   // 3. Fetch OCR text (v1 API)
