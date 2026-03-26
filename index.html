@@ -245,10 +245,23 @@
       }
 
       /* ── DailyCounter ─────────────────────────────────────────────── */
-      function DailyCounter({ log, onClear, onAnalyze, analyzing }) {
+      function DailyCounter({ log, onClear, onAnalyze, analyzing, onEdit, onDelete }) {
         const total = log.meals.reduce((sum, m) => sum + m.calories, 0);
         const pct = Math.min(100, (total / DAILY_GOAL) * 100);
         const over = total > DAILY_GOAL;
+        const [editingId, setEditingId] = useState(null);
+        const [editDish,  setEditDish]  = useState('');
+        const [editCals,  setEditCals]  = useState('');
+
+        function startEdit(m) { setEditingId(m.id); setEditDish(m.dish); setEditCals(String(m.calories)); }
+        function cancelEdit() { setEditingId(null); }
+        function saveEdit(id) {
+          const c = parseInt(editCals, 10);
+          if (!editDish.trim() || isNaN(c) || c < 0) return;
+          onEdit(id, editDish.trim(), c);
+          setEditingId(null);
+        }
+
         return (
           <div className="w-full max-w-md mx-auto mb-6 bg-white rounded-2xl shadow-sm border border-green-100 p-4">
             <div className="flex items-center justify-between mb-2">
@@ -265,10 +278,35 @@
             {log.meals.length > 0 ? (
               <ul className="space-y-1 mb-3">
                 {log.meals.map((m) => (
-                  <li key={m.id} className="flex justify-between text-xs text-gray-500">
-                    <span className="truncate mr-2">{m.dish}</span>
-                    <span className="shrink-0 font-medium text-gray-700">{m.calories} kcal · {m.time}</span>
-                  </li>
+                  editingId === m.id ? (
+                    <li key={m.id} className="flex items-center gap-1">
+                      <input
+                        value={editDish}
+                        onChange={e => setEditDish(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(m.id); if (e.key === 'Escape') cancelEdit(); }}
+                        className="flex-1 min-w-0 text-xs border border-green-300 rounded-lg px-2 py-1 outline-none focus:border-green-500"
+                        autoFocus
+                      />
+                      <input
+                        value={editCals}
+                        onChange={e => setEditCals(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(m.id); if (e.key === 'Escape') cancelEdit(); }}
+                        type="number" min="0"
+                        className="w-16 text-xs border border-green-300 rounded-lg px-2 py-1 outline-none focus:border-green-500"
+                      />
+                      <button onClick={() => saveEdit(m.id)} className="text-green-500 hover:text-green-700 text-base leading-none px-1" title="Сохранить">✓</button>
+                      <button onClick={cancelEdit}           className="text-gray-400 hover:text-gray-600 text-base leading-none px-1" title="Отмена">✕</button>
+                    </li>
+                  ) : (
+                    <li key={m.id} className="flex items-center justify-between text-xs text-gray-500 group">
+                      <span className="truncate mr-2">{m.dish}</span>
+                      <span className="shrink-0 flex items-center gap-1.5 font-medium text-gray-700">
+                        {m.calories} kcal · {m.time}
+                        <button onClick={() => startEdit(m)}  className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-green-600 transition-opacity" title="Редактировать">✏️</button>
+                        <button onClick={() => onDelete(m.id)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity text-base leading-none" title="Удалить">×</button>
+                      </span>
+                    </li>
+                  )
                 ))}
               </ul>
             ) : (
@@ -571,6 +609,22 @@
           }
         }, []);
 
+        const handleEditMeal = useCallback((id, dish, calories) => {
+          setDailyLog(prev => {
+            const updated = { ...prev, meals: prev.meals.map(m => m.id === id ? { ...m, dish, calories } : m) };
+            saveDailyLog(updated);
+            return updated;
+          });
+        }, []);
+
+        const handleDeleteMeal = useCallback((id) => {
+          setDailyLog(prev => {
+            const updated = { ...prev, meals: prev.meals.filter(m => m.id !== id) };
+            saveDailyLog(updated);
+            return updated;
+          });
+        }, []);
+
         const handleAddToLog = useCallback(() => {
           if (!result) return;
           setDailyLog((prev) => {
@@ -599,7 +653,7 @@
               </div>
             </div>
 
-            <DailyCounter log={dailyLog} onClear={handleClearDay} onAnalyze={handleAnalyzeDay} analyzing={analyzing} />
+            <DailyCounter log={dailyLog} onClear={handleClearDay} onAnalyze={handleAnalyzeDay} analyzing={analyzing} onEdit={handleEditMeal} onDelete={handleDeleteMeal} />
 
             {advice && <DailyAdviceCard advice={advice} onClose={() => setAdvice(null)} />}
 
