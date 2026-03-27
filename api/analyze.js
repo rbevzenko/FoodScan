@@ -47,7 +47,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await callWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 1024, system, messages });
+    const response = await callWithRetry({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, system, messages });
 
     if (!response.ok) {
       const err = await response.text();
