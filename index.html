@@ -123,46 +123,35 @@
         });
       }
 
-      async function analyzeImage(file) {
-        const base64 = await resizeImage(file);
-
-        const res = await fetch('/api/analyze', {
+      async function apiPost(url, body) {
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ image_base64: base64, media_type: file.type || 'image/jpeg' }),
+          body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`Error ${res.status}`);
+        if (!res.ok) {
+          let msg = `Error ${res.status}`;
+          try { const j = await res.json(); msg += ': ' + (j.error || JSON.stringify(j)); } catch {}
+          throw new Error(msg);
+        }
         return res.json();
+      }
+
+      async function analyzeImage(file) {
+        const base64 = await resizeImage(file);
+        return apiPost('/api/analyze', { image_base64: base64, media_type: file.type || 'image/jpeg' });
       }
 
       async function clarifyResult(currentResult, clarification) {
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ clarification, currentResult }),
-        });
-        if (!res.ok) throw new Error(`Error ${res.status}`);
-        return res.json();
+        return apiPost('/api/analyze', { clarification, currentResult });
       }
 
       async function getDailyAdvice(meals) {
-        const res = await fetch('/api/daily-advice', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ meals }),
-        });
-        if (!res.ok) throw new Error(`Error ${res.status}`);
-        return res.json();
+        return apiPost('/api/daily-advice', { meals });
       }
 
       async function recalculateFromIngredients(items, dish) {
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ingredients: items, dish }),
-        });
-        if (!res.ok) throw new Error(`Error ${res.status}`);
-        return res.json();
+        return apiPost('/api/analyze', { ingredients: items, dish });
       }
 
       /* ── Daily log helpers ────────────────────────────────────────── */
