@@ -26,12 +26,28 @@ export default async function handler(req, res) {
   }
 
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function callWithRetry(body) {
+    let delay = 1000;
+    for (let i = 0; i < 3; i++) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (r.status !== 529) return r;
+      if (i < 2) await sleep(delay);
+      delay *= 2;
+    }
+    return await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1024, system, messages }),
+      body: JSON.stringify(body),
     });
+  }
+
+  try {
+    const response = await callWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 1024, system, messages });
 
     if (!response.ok) {
       const err = await response.text();
