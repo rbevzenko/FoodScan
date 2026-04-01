@@ -139,7 +139,7 @@
 
       async function analyzeImage(file) {
         const base64 = await resizeImage(file);
-        return apiPost('/api/analyze', { image_base64: base64, media_type: file.type || 'image/jpeg' });
+        return apiPost('/api/analyze', { image_base64: base64, media_type: 'image/jpeg' });
       }
 
       async function clarifyResult(currentResult, clarification) {
