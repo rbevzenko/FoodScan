@@ -1,10 +1,10 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' });
+  const { image_base64, media_type, ingredients, dish, clarification, currentResult, userApiKey } = req.body;
 
-  const { image_base64, media_type, ingredients, dish, clarification, currentResult } = req.body;
+  const apiKey = userApiKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'API key not configured. Add your Anthropic API key in Settings.' });
 
   let system, messages;
 
