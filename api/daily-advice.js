@@ -1,10 +1,10 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' });
+  const { meals, userApiKey } = req.body;
 
-  const { meals } = req.body;
+  const apiKey = userApiKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'API key not configured. Add your Anthropic API key in Settings.' });
   if (!meals || !Array.isArray(meals) || meals.length === 0) {
     return res.status(400).json({ error: 'No meals provided' });
   }
