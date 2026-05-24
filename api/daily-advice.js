@@ -1,18 +1,19 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { meals, userApiKey } = req.body;
+  try {
+    const { meals, userApiKey } = req.body || {};
 
-  const apiKey = userApiKey || process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'API key not configured. Add your Anthropic API key in Settings.' });
-  if (!meals || !Array.isArray(meals) || meals.length === 0) {
-    return res.status(400).json({ error: 'No meals provided' });
-  }
+    const apiKey = userApiKey || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'API key not configured. Add your Anthropic API key in Settings (⚙️).' });
+    if (!meals || !Array.isArray(meals) || meals.length === 0) {
+      return res.status(400).json({ error: 'No meals provided' });
+    }
 
-  const totalCalories = meals.reduce((sum, m) => sum + m.calories, 0);
-  const mealList = meals.map(m => `- ${m.dish}: ${m.calories} ккал (время: ${m.time})`).join('\n');
+    const totalCalories = meals.reduce((sum, m) => sum + m.calories, 0);
+    const mealList = meals.map(m => `- ${m.dish}: ${m.calories} ккал (время: ${m.time})`).join('\n');
 
-  const system = `Ты персональный нутрициолог и диетолог. Ты помогаешь конкретному человеку достичь цели по снижению веса.
+    const system = `Ты персональный нутрициолог и диетолог. Ты помогаешь конкретному человеку достичь цели по снижению веса.
 Профиль пользователя:
 - Возраст: 48 лет
 - Пол: мужской
@@ -35,35 +36,37 @@ export default async function handler(req, res) {
 }
 Где score — оценка дня от 0 до 100, status — "excellent" / "good" / "warning" / "danger".`;
 
-  const userMessage = `Вот что я съел сегодня (суммарно ${totalCalories} ккал):\n${mealList}\n\nПроанализируй мой день питания и дай персональные рекомендации.`;
+    const userMessage = `Вот что я съел сегодня (суммарно ${totalCalories} ккал):\n${mealList}\n\nПроанализируй мой день питания и дай персональные рекомендации.`;
 
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  async function callWithRetry(body) {
-    let delay = 1000;
-    for (let i = 0; i < 3; i++) {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const callWithRetry = async (body) => {
+      const delays = [2000, 4000, 6000];
+      for (let i = 0; i < delays.length; i++) {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (r.status !== 529) return r;
+        await sleep(delays[i]);
+      }
+      return fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (r.status !== 529) return r;
-      if (i < 2) await sleep(delay);
-      delay *= 2;
-    }
-    return await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  }
+    };
 
-  try {
     const response = await callWithRetry({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system,
       messages: [{ role: 'user', content: userMessage }],
     });
+
+    if (response.status === 529) {
+      return res.status(503).json({ error: 'Серверы ИИ сейчас перегружены. Подожди минуту и попробуй снова.' });
+    }
 
     if (!response.ok) {
       const err = await response.text();
