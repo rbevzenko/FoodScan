@@ -275,12 +275,12 @@
 
       /* ── DailyAdviceCard ──────────────────────────────────────────── */
       function DailyAdviceCard({ advice, onClose }) {
-        const statusStyle = {
+        const statusStyle = ({
           excellent: { bg: 'bg-green-50', border: 'border-green-200', badge: 'bg-green-100 text-green-700', label: 'Отлично!' },
           good:      { bg: 'bg-blue-50',  border: 'border-blue-200',  badge: 'bg-blue-100 text-blue-700',   label: 'Хорошо' },
           warning:   { bg: 'bg-yellow-50',border: 'border-yellow-200',badge: 'bg-yellow-100 text-yellow-700',label: 'Внимание' },
           danger:    { bg: 'bg-red-50',   border: 'border-red-200',   badge: 'bg-red-100 text-red-700',     label: 'Стоп!' },
-        }[advice.status] ?? { bg: 'bg-gray-50', border: 'border-gray-200', badge: 'bg-gray-100 text-gray-700', label: '' };
+        }[advice.status]) || { bg: 'bg-gray-50', border: 'border-gray-200', badge: 'bg-gray-100 text-gray-700', label: '' };
 
         const scoreColor = advice.score >= 80 ? 'text-green-600' : advice.score >= 60 ? 'text-blue-600' : advice.score >= 40 ? 'text-yellow-600' : 'text-red-600';
 
@@ -473,7 +473,7 @@
       }
 
       function ConfidenceBadge({ level }) {
-        const style = { low: 'bg-red-100 text-red-700', medium: 'bg-yellow-100 text-yellow-700', high: 'bg-green-100 text-green-700' }[level] ?? 'bg-gray-100 text-gray-600';
+        const style = ({ low: 'bg-red-100 text-red-700', medium: 'bg-yellow-100 text-yellow-700', high: 'bg-green-100 text-green-700' }[level]) || 'bg-gray-100 text-gray-600';
         return <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${style}`}>{level} confidence</span>;
       }
 
@@ -757,14 +757,14 @@
         const [dragging, setDragging] = useState(false);
         const fileRef = useRef(null);
         const cameraRef = useRef(null);
-        const pick = (e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; };
+        const pick = (e) => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; };
         return (
           <div className="w-full max-w-md mx-auto space-y-4">
             <div
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
-              onClick={() => fileRef.current?.click()}
+              onClick={() => fileRef.current && fileRef.current.click()}
               className={`relative flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-2xl p-10 cursor-pointer transition-all duration-200 select-none ${
                 dragging ? 'border-green-500 bg-green-50 scale-[1.02]' : 'border-green-200 bg-white hover:border-green-400 hover:bg-green-50'
               }`}
@@ -777,7 +777,7 @@
               <p className="text-xs text-gray-300">PNG · JPG · WEBP · HEIC</p>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pick} />
             </div>
-            <button onClick={() => cameraRef.current?.click()}
+            <button onClick={() => cameraRef.current && cameraRef.current.click()}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors">
               <span className="text-lg">📷</span> Take a Photo
             </button>
