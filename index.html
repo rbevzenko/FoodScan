@@ -913,9 +913,9 @@
             const updated = { ...prev, meals: [...prev.meals, {
               id: Date.now().toString(), dish: result.dish, calories: result.totalCalories,
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              protein: result.macros?.protein ?? null,
-              fat:     result.macros?.fat     ?? null,
-              carbs:   result.macros?.carbs   ?? null,
+              protein: result.macros ? result.macros.protein : null,
+              fat:     result.macros ? result.macros.fat     : null,
+              carbs:   result.macros ? result.macros.carbs   : null,
             }]};
             saveDailyLog(updated);
             return updated;
