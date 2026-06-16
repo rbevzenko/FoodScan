@@ -817,8 +817,6 @@
           }
         }, [dailyLog.meals, auth]);
 
-        if (!auth) return <LoginScreen onLogin={handleLogin} />;
-
         const handleFile = useCallback(async (file) => {
           if (!file.type.startsWith('image/')) { setErrorMsg('Please upload an image file.'); setState('error'); return; }
           setImageUrl(URL.createObjectURL(file));
@@ -922,6 +920,8 @@
           });
           reset();
         }, [result, reset]);
+
+        if (!auth) return <LoginScreen onLogin={handleLogin} />;
 
         return (
           <div className="min-h-screen py-8 px-4">
