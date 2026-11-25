@@ -19,7 +19,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
     <style>
       @keyframes shimmer {
         0%   { background-position: -400px 0; }
@@ -46,7 +46,8 @@
         { id: 4, label: 'User 4', password: 'macro-track-9147'  },
         { id: 5, label: 'User 5', password: 'daily-feast-6380'  },
       ];
-      const AUTH_KEY = 'foodscan_auth';
+      const AUTH_KEY    = 'foodscan_auth';
+      const APIKEY_PREFIX = 'foodscan_apikey_';
 
       function loadAuth() {
         try { const raw = localStorage.getItem(AUTH_KEY); if (raw) return JSON.parse(raw); } catch {}
@@ -54,6 +55,14 @@
       }
       function saveAuth(user) { localStorage.setItem(AUTH_KEY, JSON.stringify(user)); }
       function clearAuth() { localStorage.removeItem(AUTH_KEY); }
+
+      function loadApiKey(userId) {
+        return localStorage.getItem(APIKEY_PREFIX + userId) || '';
+      }
+      function saveApiKey(userId, key) {
+        if (key) localStorage.setItem(APIKEY_PREFIX + userId, key);
+        else localStorage.removeItem(APIKEY_PREFIX + userId);
+      }
 
       /* ── LoginScreen ──────────────────────────────────────────────── */
       function LoginScreen({ onLogin }) {
@@ -105,46 +114,60 @@
         );
       }
 
-      async function analyzeImage(file) {
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(',')[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
+      async function resizeImage(file, maxPx = 1024, quality = 0.8) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width  = Math.round(img.width  * scale);
+            canvas.height = Math.round(img.height * scale);
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', quality).split(',')[1]);
+          };
+          img.onerror = reject;
+          img.src = url;
         });
+      }
 
-        const res = await fetch('/api/analyze', {
+      async function apiPost(url, body) {
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ image_base64: base64, media_type: file.type || 'image/jpeg' }),
+          body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`Error ${res.status}`);
+        if (!res.ok) {
+          let msg = `Error ${res.status}`;
+          try { const j = await res.json(); msg += ': ' + (j.error || JSON.stringify(j)); } catch {}
+          throw new Error(msg);
+        }
         return res.json();
       }
 
-      async function clarifyResult(currentResult, clarification) {
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ clarification, currentResult }),
-        });
-        if (!res.ok) throw new Error(`Error ${res.status}`);
-        return res.json();
+      async function analyzeImage(file, userApiKey) {
+        const base64 = await resizeImage(file);
+        return apiPost('/api/analyze', { image_base64: base64, media_type: 'image/jpeg', userApiKey });
       }
 
-      async function recalculateFromIngredients(items, dish) {
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ingredients: items, dish }),
-        });
-        if (!res.ok) throw new Error(`Error ${res.status}`);
-        return res.json();
+      async function clarifyResult(currentResult, clarification, userApiKey) {
+        return apiPost('/api/analyze', { clarification, currentResult, userApiKey });
+      }
+
+      async function getDailyAdvice(meals, userApiKey) {
+        return apiPost('/api/daily-advice', { meals, userApiKey });
+      }
+
+      async function recalculateFromIngredients(items, dish, userApiKey) {
+        return apiPost('/api/analyze', { ingredients: items, dish, userApiKey });
       }
 
       /* ── Daily log helpers ────────────────────────────────────────── */
-      const DAILY_GOAL = 1700;
-      const STORAGE_KEY = 'foodscan_daily_log';
+      const DAILY_GOAL    = 1700;
+      const MACRO_GOALS   = { protein: 130, fat: 50, carbs: 140 };
+      const STORAGE_KEY   = 'foodscan_daily_log';
+      const FAV_PREFIX    = 'foodscan_favorites_';
 
       function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -158,11 +181,209 @@
 
       function saveDailyLog(log) { localStorage.setItem(STORAGE_KEY, JSON.stringify(log)); }
 
+      function loadFavorites(userId) {
+        try { const raw = localStorage.getItem(FAV_PREFIX + userId); if (raw) return JSON.parse(raw); } catch {}
+        return [];
+      }
+      function saveFavorites(userId, list) { localStorage.setItem(FAV_PREFIX + userId, JSON.stringify(list)); }
+
+      /* ── SettingsModal ────────────────────────────────────────────── */
+      function SettingsModal({ userId, onClose }) {
+        const [key, setKey]   = useState(() => loadApiKey(userId));
+        const [show, setShow] = useState(false);
+        const [saved, setSaved] = useState(false);
+
+        const isValid = key.trim().startsWith('sk-ant-');
+
+        function handleSave() {
+          saveApiKey(userId, key.trim());
+          setSaved(true);
+          setTimeout(() => { setSaved(false); onClose(); }, 800);
+        }
+        function handleClear() {
+          saveApiKey(userId, '');
+          setKey('');
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-6 space-y-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-gray-800">⚙️ Настройки API</h2>
+                <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              </div>
+
+              <div className="bg-blue-50 rounded-xl p-3 text-xs text-blue-700 leading-relaxed">
+                Введи свой ключ Anthropic API. Он хранится только на твоём устройстве и отправляется напрямую в сервис.{' '}
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer"
+                   className="underline font-semibold">Получить ключ →</a>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-600 mb-1.5">API-ключ Anthropic</label>
+                <div className="relative">
+                  <input
+                    type={show ? 'text' : 'password'}
+                    value={key}
+                    onChange={e => { setKey(e.target.value); setSaved(false); }}
+                    placeholder="sk-ant-api03-…"
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 pr-12 text-sm font-mono outline-none focus:border-green-400 transition-colors"
+                  />
+                  <button type="button" onClick={() => setShow(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg">
+                    {show ? '🙈' : '👁️'}
+                  </button>
+                </div>
+                {key && !isValid && (
+                  <p className="text-xs text-red-500 mt-1">Ключ должен начинаться с <code>sk-ant-</code></p>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                {loadApiKey(userId) && (
+                  <button onClick={handleClear}
+                    className="px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 text-sm font-semibold transition-colors">
+                    Удалить
+                  </button>
+                )}
+                <button onClick={handleSave} disabled={!isValid || saved}
+                  className="flex-1 py-2.5 rounded-xl bg-green-500 hover:bg-green-600 disabled:bg-green-200 text-white font-semibold text-sm transition-colors">
+                  {saved ? '✓ Сохранено' : 'Сохранить'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      /* ── NoKeyBanner ──────────────────────────────────────────────── */
+      function NoKeyBanner({ onOpen }) {
+        return (
+          <div className="w-full max-w-md mx-auto mb-4 bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+            <span className="text-xl shrink-0">🔑</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-800">Нужен API-ключ</p>
+              <p className="text-xs text-amber-700 mt-0.5">Добавь свой ключ Anthropic, чтобы приложение работало за твой счёт.</p>
+            </div>
+            <button onClick={onOpen}
+              className="shrink-0 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors">
+              Добавить
+            </button>
+          </div>
+        );
+      }
+
+      /* ── DailyAdviceCard ──────────────────────────────────────────── */
+      function DailyAdviceCard({ advice, onClose }) {
+        const statusStyle = ({
+          excellent: { bg: 'bg-green-50', border: 'border-green-200', badge: 'bg-green-100 text-green-700', label: 'Отлично!' },
+          good:      { bg: 'bg-blue-50',  border: 'border-blue-200',  badge: 'bg-blue-100 text-blue-700',   label: 'Хорошо' },
+          warning:   { bg: 'bg-yellow-50',border: 'border-yellow-200',badge: 'bg-yellow-100 text-yellow-700',label: 'Внимание' },
+          danger:    { bg: 'bg-red-50',   border: 'border-red-200',   badge: 'bg-red-100 text-red-700',     label: 'Стоп!' },
+        }[advice.status]) || { bg: 'bg-gray-50', border: 'border-gray-200', badge: 'bg-gray-100 text-gray-700', label: '' };
+
+        const scoreColor = advice.score >= 80 ? 'text-green-600' : advice.score >= 60 ? 'text-blue-600' : advice.score >= 40 ? 'text-yellow-600' : 'text-red-600';
+
+        return (
+          <div className={`w-full max-w-md mx-auto mb-6 rounded-2xl shadow-sm border ${statusStyle.border} ${statusStyle.bg} p-5 space-y-4`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🤖</span>
+                <span className="font-bold text-gray-800 text-sm">Анализ дня от ИИ</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-2xl font-extrabold leading-none ${scoreColor}`}>{advice.score}</span>
+                <span className="text-xs text-gray-400">/100</span>
+                <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-semibold ${statusStyle.badge}`}>{statusStyle.label}</span>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-700 leading-relaxed">{advice.summary}</p>
+
+            <div className="bg-white bg-opacity-60 rounded-xl p-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Калории</p>
+              <p className="text-sm text-gray-700">{advice.calories_comment}</p>
+            </div>
+
+            {advice.advice && advice.advice.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Рекомендации</p>
+                <ul className="space-y-2">
+                  {advice.advice.map((tip, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                      <span className="text-green-500 shrink-0 mt-0.5">✓</span>
+                      <span>{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {advice.tomorrow_tip && (
+              <div className="bg-white bg-opacity-60 rounded-xl p-3 flex gap-2">
+                <span className="text-lg shrink-0">🌅</span>
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-0.5">На завтра</p>
+                  <p className="text-sm text-gray-700">{advice.tomorrow_tip}</p>
+                </div>
+              </div>
+            )}
+
+            <button onClick={onClose} className="w-full py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-500 text-xs font-semibold transition-colors">
+              Скрыть анализ
+            </button>
+          </div>
+        );
+      }
+
+      /* ── MacroProgress ───────────────────────────────────────────── */
+      function MacroProgress({ label, value, goal, color }) {
+        const pct  = goal > 0 ? Math.min(100, (value / goal) * 100) : 0;
+        const over = value > goal;
+        return (
+          <div>
+            <div className="flex justify-between items-baseline mb-1">
+              <span className="text-xs font-semibold text-gray-500">{label}</span>
+              <span className="text-xs text-gray-400">
+                <span className={`font-bold ${over ? 'text-red-500' : 'text-gray-700'}`}>{value}г</span>
+                {' / '}{goal}г
+              </span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-1.5">
+              <div className={`h-1.5 rounded-full transition-all duration-700 ${over ? 'bg-red-400' : color}`}
+                style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      }
+
       /* ── DailyCounter ─────────────────────────────────────────────── */
-      function DailyCounter({ log, onClear }) {
+      function DailyCounter({ log, onClear, onAnalyze, analyzing, onEdit, onDelete }) {
         const total = log.meals.reduce((sum, m) => sum + m.calories, 0);
-        const pct = Math.min(100, (total / DAILY_GOAL) * 100);
-        const over = total > DAILY_GOAL;
+        const pct   = Math.min(100, (total / DAILY_GOAL) * 100);
+        const over  = total > DAILY_GOAL;
+
+        const mealsWithMacros = log.meals.filter(m => m.protein !== null && m.protein !== undefined);
+        const hasMacros       = mealsWithMacros.length > 0;
+        const incomplete      = hasMacros && mealsWithMacros.length < log.meals.length;
+        const macroTotals     = mealsWithMacros.reduce(
+          (acc, m) => ({ protein: acc.protein + (m.protein || 0), fat: acc.fat + (m.fat || 0), carbs: acc.carbs + (m.carbs || 0) }),
+          { protein: 0, fat: 0, carbs: 0 }
+        );
+
+        const [editingId, setEditingId] = useState(null);
+        const [editDish,  setEditDish]  = useState('');
+        const [editCals,  setEditCals]  = useState('');
+
+        function startEdit(m) { setEditingId(m.id); setEditDish(m.dish); setEditCals(String(m.calories)); }
+        function cancelEdit() { setEditingId(null); }
+        function saveEdit(id) {
+          const c = parseInt(editCals, 10);
+          if (!editDish.trim() || isNaN(c) || c < 0) return;
+          onEdit(id, editDish.trim(), c);
+          setEditingId(null);
+        }
+
         return (
           <div className="w-full max-w-md mx-auto mb-6 bg-white rounded-2xl shadow-sm border border-green-100 p-4">
             <div className="flex items-center justify-between mb-2">
@@ -176,18 +397,66 @@
             <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
               <div className={`h-2 rounded-full transition-all duration-700 ${over ? 'bg-red-400' : 'bg-green-400'}`} style={{ width: `${pct}%` }} />
             </div>
+
+            {hasMacros && (
+              <div className="mb-3 space-y-1.5 border-t border-gray-50 pt-3">
+                <MacroProgress label="Белки"    value={macroTotals.protein} goal={MACRO_GOALS.protein} color="bg-blue-400" />
+                <MacroProgress label="Жиры"     value={macroTotals.fat}     goal={MACRO_GOALS.fat}     color="bg-yellow-400" />
+                <MacroProgress label="Углеводы" value={macroTotals.carbs}   goal={MACRO_GOALS.carbs}   color="bg-orange-400" />
+                {incomplete && (
+                  <p className="text-xs text-gray-400 mt-1">⚠️ часть блюд добавлена без данных о БЖУ</p>
+                )}
+              </div>
+            )}
+
             {log.meals.length > 0 ? (
-              <ul className="space-y-1">
+              <ul className="space-y-1 mb-3">
                 {log.meals.map((m) => (
-                  <li key={m.id} className="flex justify-between text-xs text-gray-500">
-                    <span className="truncate mr-2">{m.dish}</span>
-                    <span className="shrink-0 font-medium text-gray-700">{m.calories} kcal · {m.time}</span>
-                  </li>
+                  editingId === m.id ? (
+                    <li key={m.id} className="flex items-center gap-1">
+                      <input
+                        value={editDish}
+                        onChange={e => setEditDish(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(m.id); if (e.key === 'Escape') cancelEdit(); }}
+                        className="flex-1 min-w-0 text-xs border border-green-300 rounded-lg px-2 py-1 outline-none focus:border-green-500"
+                        autoFocus
+                      />
+                      <input
+                        value={editCals}
+                        onChange={e => setEditCals(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(m.id); if (e.key === 'Escape') cancelEdit(); }}
+                        type="number" min="0"
+                        className="w-16 text-xs border border-green-300 rounded-lg px-2 py-1 outline-none focus:border-green-500"
+                      />
+                      <button onClick={() => saveEdit(m.id)} className="text-green-500 hover:text-green-700 text-base leading-none px-1" title="Сохранить">✓</button>
+                      <button onClick={cancelEdit}           className="text-gray-400 hover:text-gray-600 text-base leading-none px-1" title="Отмена">✕</button>
+                    </li>
+                  ) : (
+                    <li key={m.id} className="flex items-center justify-between text-xs text-gray-500 group">
+                      <span className="truncate mr-2">{m.dish}</span>
+                      <span className="shrink-0 flex items-center gap-1.5 font-medium text-gray-700">
+                        {m.calories} kcal · {m.time}
+                        <button onClick={() => startEdit(m)}  className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-green-600 transition-opacity" title="Редактировать">✏️</button>
+                        <button onClick={() => onDelete(m.id)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity text-base leading-none" title="Удалить">×</button>
+                      </span>
+                    </li>
+                  )
                 ))}
               </ul>
             ) : (
-              <p className="text-xs text-gray-400 text-center">No meals logged yet today</p>
+              <p className="text-xs text-gray-400 text-center mb-3">No meals logged yet today</p>
             )}
+            <button
+              onClick={onAnalyze}
+              disabled={analyzing || log.meals.length === 0}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-green-200 disabled:to-green-200 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2"
+            >
+              {analyzing ? (
+                <><span className="animate-spin">⏳</span> ИИ анализирует…</>
+              ) : (
+                <><span>🤖</span> Анализ дня от ИИ</>
+              )}
+            </button>
           </div>
         );
       }
@@ -204,7 +473,7 @@
       }
 
       function ConfidenceBadge({ level }) {
-        const style = { low: 'bg-red-100 text-red-700', medium: 'bg-yellow-100 text-yellow-700', high: 'bg-green-100 text-green-700' }[level] ?? 'bg-gray-100 text-gray-600';
+        const style = ({ low: 'bg-red-100 text-red-700', medium: 'bg-yellow-100 text-yellow-700', high: 'bg-green-100 text-green-700' }[level]) || 'bg-gray-100 text-gray-600';
         return <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${style}`}>{level} confidence</span>;
       }
 
@@ -224,15 +493,21 @@
       }
 
       /* ── ResultCard ───────────────────────────────────────────────── */
-      function ResultCard({ result, imageUrl, onReset, onRecalculate, onAddToLog, onClarify }) {
+      function ResultCard({ result, imageUrl, onReset, onRecalculate, onAddToLog, onClarify, onSaveFavorite }) {
         const total = result.macros.protein + result.macros.carbs + result.macros.fat;
         const [adjusting, setAdjusting] = useState(false);
         const [editItems, setEditItems] = useState(result.items);
         const [newName, setNewName] = useState('');
         const [newAmount, setNewAmount] = useState('');
         const [recalcLoading, setRecalcLoading] = useState(false);
-        const [clarifyText, setClarifyText] = useState('');
+        const [clarifyText, setClarifyText]   = useState('');
         const [clarifyLoading, setClarifyLoading] = useState(false);
+        const [favSaved, setFavSaved]         = useState(false);
+
+        function handleSaveFavorite() {
+          onSaveFavorite(result.dish, result.totalCalories);
+          setFavSaved(true);
+        }
 
         useEffect(() => { setEditItems(result.items); setAdjusting(false); setClarifyText(''); }, [result]);
 
@@ -354,6 +629,17 @@
                 </div>
               </div>
             </div>
+            <button
+              onClick={handleSaveFavorite}
+              disabled={favSaved}
+              className={`w-full py-2.5 rounded-2xl border text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                favSaved
+                  ? 'border-yellow-200 bg-yellow-50 text-yellow-600'
+                  : 'border-yellow-200 bg-yellow-50 hover:bg-yellow-100 text-yellow-700'
+              }`}
+            >
+              {favSaved ? '⭐ Сохранено в избранное' : '⭐ Сохранить в избранное'}
+            </button>
             <div className="flex gap-3">
               <button onClick={onReset} className="flex-1 py-3 rounded-2xl border border-gray-200 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-600 font-semibold text-sm transition-colors">
                 Не добавлять
@@ -366,19 +652,119 @@
         );
       }
 
+      /* ── FavoritesPanel ──────────────────────────────────────────── */
+      function FavoritesPanel({ favorites, onAdd, onDelete, onAddToLog }) {
+        const [open, setOpen]   = useState(false);
+        const [name, setName]   = useState('');
+        const [cals, setCals]   = useState('');
+        const [flash, setFlash] = useState(null);
+
+        function handleAdd() {
+          const c = parseInt(cals, 10);
+          if (!name.trim() || isNaN(c) || c <= 0) return;
+          onAdd(name.trim(), c);
+          setName(''); setCals('');
+        }
+
+        function handleAddToLog(fav) {
+          onAddToLog(fav);
+          setFlash(fav.id);
+          setTimeout(() => setFlash(null), 1000);
+        }
+
+        return (
+          <div className="w-full max-w-md mx-auto mb-6">
+            <button
+              onClick={() => setOpen(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-white rounded-2xl shadow-sm border border-yellow-100 hover:border-yellow-300 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">⭐</span>
+                <span className="font-semibold text-gray-700 text-sm">Избранное</span>
+                {favorites.length > 0 && (
+                  <span className="bg-yellow-100 text-yellow-700 text-xs font-bold px-2 py-0.5 rounded-full">{favorites.length}</span>
+                )}
+              </div>
+              <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
+            </button>
+
+            {open && (
+              <div className="mt-2 bg-white rounded-2xl shadow-sm border border-yellow-100 p-4 space-y-3">
+                {favorites.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-2">
+                    Пока пусто. Добавь блюдо вручную ниже или нажми ⭐ на карточке после сканирования.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {favorites.map(fav => (
+                      <li key={fav.id} className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-700 truncate">{fav.dish}</p>
+                          <p className="text-xs text-gray-400">{fav.calories} ккал</p>
+                        </div>
+                        <button
+                          onClick={() => handleAddToLog(fav)}
+                          className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                            flash === fav.id
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-green-500 hover:bg-green-600 text-white'
+                          }`}
+                        >
+                          {flash === fav.id ? '✓ Добавлено' : '+ в лог'}
+                        </button>
+                        <button
+                          onClick={() => onDelete(fav.id)}
+                          className="shrink-0 text-gray-300 hover:text-red-400 transition-colors text-xl leading-none px-1"
+                          title="Удалить из избранного"
+                        >×</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="border-t border-gray-100 pt-3">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Добавить вручную</p>
+                  <div className="flex gap-2">
+                    <input
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                      placeholder="Название, напр. «1 банан»"
+                      className="flex-1 min-w-0 text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-yellow-400 transition-colors"
+                    />
+                    <input
+                      value={cals}
+                      onChange={e => setCals(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                      type="number" min="1" placeholder="ккал"
+                      className="w-20 text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-yellow-400 transition-colors"
+                    />
+                    <button
+                      onClick={handleAdd}
+                      disabled={!name.trim() || !cals.trim()}
+                      className="px-3 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-500 disabled:bg-gray-200 text-white font-bold text-lg leading-none transition-colors"
+                    >+</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
       /* ── UploadZone ───────────────────────────────────────────────── */
       function UploadZone({ onFile }) {
         const [dragging, setDragging] = useState(false);
         const fileRef = useRef(null);
         const cameraRef = useRef(null);
-        const pick = (e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; };
+        const pick = (e) => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; };
         return (
           <div className="w-full max-w-md mx-auto space-y-4">
             <div
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
-              onClick={() => fileRef.current?.click()}
+              onClick={() => fileRef.current && fileRef.current.click()}
               className={`relative flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-2xl p-10 cursor-pointer transition-all duration-200 select-none ${
                 dragging ? 'border-green-500 bg-green-50 scale-[1.02]' : 'border-green-200 bg-white hover:border-green-400 hover:bg-green-50'
               }`}
@@ -391,7 +777,7 @@
               <p className="text-xs text-gray-300">PNG · JPG · WEBP · HEIC</p>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pick} />
             </div>
-            <button onClick={() => cameraRef.current?.click()}
+            <button onClick={() => cameraRef.current && cameraRef.current.click()}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-green-200 bg-white hover:bg-green-50 active:bg-green-100 text-green-700 font-semibold text-sm transition-colors">
               <span className="text-lg">📷</span> Take a Photo
             </button>
@@ -402,43 +788,60 @@
 
       /* ── App ──────────────────────────────────────────────────────── */
       function App() {
-        const [auth,     setAuth]     = useState(() => loadAuth());
-        const [state,    setState]    = useState('idle');
-        const [result,   setResult]   = useState(null);
-        const [imageUrl, setImageUrl] = useState('');
-        const [errorMsg, setErrorMsg] = useState('');
-        const [dailyLog, setDailyLog] = useState(() => loadDailyLog());
+        const [auth,        setAuth]        = useState(() => loadAuth());
+        const [state,       setState]       = useState('idle');
+        const [result,      setResult]      = useState(null);
+        const [imageUrl,    setImageUrl]    = useState('');
+        const [errorMsg,    setErrorMsg]    = useState('');
+        const [dailyLog,    setDailyLog]    = useState(() => loadDailyLog());
+        const [advice,       setAdvice]       = useState(null);
+        const [analyzing,    setAnalyzing]    = useState(false);
+        const [showSettings, setShowSettings] = useState(false);
+        const [favorites,    setFavorites]    = useState(() => auth ? loadFavorites(auth.id) : []);
 
-        function handleLogin(user) { saveAuth(user); setAuth(user); }
-        function handleLogout() { clearAuth(); setAuth(null); setState('idle'); setResult(null); setImageUrl(''); setErrorMsg(''); }
+        const apiKey = auth ? loadApiKey(auth.id) : '';
 
-        if (!auth) return <LoginScreen onLogin={handleLogin} />;
+        function handleLogin(user) { saveAuth(user); setAuth(user); setFavorites(loadFavorites(user.id)); }
+        function handleLogout() { clearAuth(); setAuth(null); setState('idle'); setResult(null); setImageUrl(''); setErrorMsg(''); setAdvice(null); setFavorites([]); }
+
+        const handleAnalyzeDay = useCallback(async () => {
+          setAnalyzing(true);
+          setAdvice(null);
+          try {
+            const data = await getDailyAdvice(dailyLog.meals, loadApiKey(auth.id));
+            setAdvice(data);
+          } catch (err) {
+            setErrorMsg(err.message || 'Не удалось получить анализ.');
+          } finally {
+            setAnalyzing(false);
+          }
+        }, [dailyLog.meals, auth]);
 
         const handleFile = useCallback(async (file) => {
           if (!file.type.startsWith('image/')) { setErrorMsg('Please upload an image file.'); setState('error'); return; }
           setImageUrl(URL.createObjectURL(file));
           setState('loading');
           try {
-            const data = await analyzeImage(file);
+            const data = await analyzeImage(file, loadApiKey(auth.id));
             setResult(data);
             setState('result');
           } catch (err) {
             setErrorMsg(err.message || 'Something went wrong.');
             setState('error');
           }
-        }, []);
+        }, [auth]);
 
         const handleRecalculate = useCallback(async (items, dish) => {
           setState('loading');
           try {
-            const data = await recalculateFromIngredients(items, dish);
+            const data = await recalculateFromIngredients(items, dish, loadApiKey(auth.id));
             setResult(data);
             setState('result');
           } catch (err) {
             setErrorMsg(err.message || 'Something went wrong.');
             setState('error');
           }
-        }, []);
+        }, [auth]);
 
         const handleClearDay = useCallback(() => {
           const fresh = { date: todayStr(), meals: [] };
@@ -450,13 +853,56 @@
         const handleClarify = useCallback(async (currentResult, clarification) => {
           setState('loading');
           try {
-            const data = await clarifyResult(currentResult, clarification);
+            const data = await clarifyResult(currentResult, clarification, loadApiKey(auth.id));
             setResult(data);
             setState('result');
           } catch (err) {
             setErrorMsg(err.message || 'Something went wrong.');
             setState('error');
           }
+        }, [auth]);
+
+        const handleEditMeal = useCallback((id, dish, calories) => {
+          setDailyLog(prev => {
+            const updated = { ...prev, meals: prev.meals.map(m => m.id === id ? { ...m, dish, calories } : m) };
+            saveDailyLog(updated);
+            return updated;
+          });
+        }, []);
+
+        const handleDeleteMeal = useCallback((id) => {
+          setDailyLog(prev => {
+            const updated = { ...prev, meals: prev.meals.filter(m => m.id !== id) };
+            saveDailyLog(updated);
+            return updated;
+          });
+        }, []);
+
+        const handleAddFavorite = useCallback((dish, calories) => {
+          setFavorites(prev => {
+            const updated = [...prev, { id: Date.now().toString(), dish, calories }];
+            saveFavorites(auth.id, updated);
+            return updated;
+          });
+        }, [auth]);
+
+        const handleDeleteFavorite = useCallback((id) => {
+          setFavorites(prev => {
+            const updated = prev.filter(f => f.id !== id);
+            saveFavorites(auth.id, updated);
+            return updated;
+          });
+        }, [auth]);
+
+        const handleAddFavoriteToLog = useCallback((fav) => {
+          setDailyLog(prev => {
+            const updated = { ...prev, meals: [...prev.meals, {
+              id: Date.now().toString(), dish: fav.dish, calories: fav.calories,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }]};
+            saveDailyLog(updated);
+            return updated;
+          });
         }, []);
 
         const handleAddToLog = useCallback(() => {
@@ -465,6 +911,9 @@
             const updated = { ...prev, meals: [...prev.meals, {
               id: Date.now().toString(), dish: result.dish, calories: result.totalCalories,
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              protein: result.macros ? result.macros.protein : null,
+              fat:     result.macros ? result.macros.fat     : null,
+              carbs:   result.macros ? result.macros.carbs   : null,
             }]};
             saveDailyLog(updated);
             return updated;
@@ -472,13 +921,22 @@
           reset();
         }, [result, reset]);
 
+        if (!auth) return <LoginScreen onLogin={handleLogin} />;
+
         return (
           <div className="min-h-screen py-8 px-4">
+            {showSettings && <SettingsModal userId={auth.id} onClose={() => setShowSettings(false)} />}
+
             <div className="relative text-center mb-8">
               <h1 className="text-3xl font-extrabold text-gray-800 tracking-tight">FoodScan</h1>
               <p className="text-gray-400 mt-1 text-sm">AI-powered food & calorie analyzer</p>
               <div className="absolute top-0 right-0 flex items-center gap-2">
                 <span className="text-xs text-gray-500 font-medium hidden sm:inline">{auth.label}</span>
+                <button onClick={() => setShowSettings(true)}
+                  title="Настройки API"
+                  className={`flex items-center justify-center w-8 h-8 rounded-full text-base transition-colors ${apiKey ? 'bg-green-100 hover:bg-green-200 text-green-700' : 'bg-amber-100 hover:bg-amber-200 text-amber-600'}`}>
+                  ⚙️
+                </button>
                 <button onClick={() => { if (window.confirm('Выйти из аккаунта?')) handleLogout(); }}
                   title="Выйти"
                   className="flex items-center gap-1 px-3 h-8 rounded-full bg-green-100 hover:bg-red-100 text-green-700 hover:text-red-600 text-xs font-semibold transition-colors">
@@ -487,7 +945,18 @@
               </div>
             </div>
 
-            <DailyCounter log={dailyLog} onClear={handleClearDay} />
+            {!apiKey && <NoKeyBanner onOpen={() => setShowSettings(true)} />}
+
+            <DailyCounter log={dailyLog} onClear={handleClearDay} onAnalyze={handleAnalyzeDay} analyzing={analyzing} onEdit={handleEditMeal} onDelete={handleDeleteMeal} />
+
+            {advice && <DailyAdviceCard advice={advice} onClose={() => setAdvice(null)} />}
+
+            <FavoritesPanel
+              favorites={favorites}
+              onAdd={handleAddFavorite}
+              onDelete={handleDeleteFavorite}
+              onAddToLog={handleAddFavoriteToLog}
+            />
 
             {state === 'idle' && <UploadZone onFile={handleFile} />}
 
@@ -501,7 +970,7 @@
               </div>
             )}
 
-            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onRecalculate={handleRecalculate} onAddToLog={handleAddToLog} onClarify={handleClarify} />}
+            {state === 'result' && result && <ResultCard result={result} imageUrl={imageUrl} onReset={reset} onRecalculate={handleRecalculate} onAddToLog={handleAddToLog} onClarify={handleClarify} onSaveFavorite={handleAddFavorite} />}
 
             {state === 'error' && (
               <div className="w-full max-w-md mx-auto space-y-4">
